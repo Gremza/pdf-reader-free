@@ -1,0 +1,63 @@
+{
+  "name": "pdf-reader-free",
+  "productName": "PDF Reader",
+  "version": "1.0.0",
+  "description": "A simple, fast and free PDF viewer",
+  "author": "Marsel Preci",
+  "license": "MIT",
+  "private": true,
+  "main": "src/main.js",
+  "dependencies": {
+    "pdfjs-dist": "^6.4.299"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64",
+    "dist:arm64": "electron-builder --win --arm64"
+  },
+  "build": {
+    "appId": "al.preci.pdfreaderfree",
+    "productName": "PDF Reader",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**",
+      "!**/*.map",
+      "!**/*.d.mts",
+      "!node_modules/pdfjs-dist/{legacy,image_decoders}/**",
+      "!node_modules/pdfjs-dist/build/*.min.mjs",
+      "!node_modules/pdfjs-dist/build/pdf.sandbox*",
+      "!node_modules/pdfjs-dist/webpack.mjs",
+      "!node_modules/@napi-rs/**"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "description": "PDF Document",
+        "role": "Viewer"
+      }
+    ],
+    "win": {
+      "icon": "src/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "PDF-Reader-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "PDF-Reader-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

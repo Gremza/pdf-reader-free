@@ -3,3 +3,5 @@ build/
 .swiftpm/
 .DS_Store
 *.xcodeproj/xcuserdata/
+windows/node_modules/
+windows/dist/
