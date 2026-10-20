@@ -3,15 +3,13 @@ import PDFKit
 
 struct ContentView: View {
     @EnvironmentObject private var tabs: TabsModel
-    @State private var showThumbnails = true
-
     var body: some View {
         VStack(spacing: 0) {
-            TopBar(showThumbnails: $showThumbnails)
+            TopBar()
             Divider()
 
             if let tab = tabs.selected {
-                DocumentView(model: tab.model, showThumbnails: showThumbnails)
+                DocumentView(model: tab.model, showThumbnails: tabs.showThumbnails)
                     .id(tab.id)
             } else {
                 EmptyState()
@@ -35,11 +33,32 @@ private struct DocumentView: View {
     var body: some View {
         HStack(spacing: 0) {
             if showThumbnails {
-                ThumbnailView(pdfView: model.pdfView)
+                ThumbnailSidebar(model: model)
                     .frame(width: 150)
                 Divider()
             }
             PDFKitView(pdfView: model.pdfView)
+                .overlay(alignment: .bottom) { ExportProgressBadge(model: model) }
+        }
+    }
+}
+
+private struct ExportProgressBadge: View {
+    @ObservedObject var model: PDFViewModel
+
+    var body: some View {
+        if let progress = model.exportProgress {
+            HStack(spacing: 10) {
+                ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                    .frame(width: 120)
+                Text("\(progress.label) \(progress.done) / \(progress.total)…")
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4, y: 1)
+            .padding(.bottom, 20)
         }
     }
 }

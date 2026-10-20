@@ -14,14 +14,19 @@
 ## Features
 
 - **Tabs in the top bar** — open many PDFs side by side; tabs that don't fit go into a `»` overflow menu
-- **Page thumbnails** sidebar
+- **Page thumbnails** sidebar — drag to reorder pages, right-click for page actions, `Delete` removes a page
 - **Zoom**: zoom in/out, fit width, fit whole page, actual size (100%)
 - **Layouts**: single page, continuous, two pages, two pages continuous
 - **Rotate** pages left / right
 - **Full screen**
 - **Search** text inside the document
+- **Edit pages**: delete, rotate, insert blank pages, insert pages from other PDFs, merge PDFs, with undo
+- **Save / Save As** — changes are only written when you save; unsaved tabs show `●` and ask before closing
+- **Extract pages** (e.g. `1-3, 5`) into a new PDF, or **split** every page into its own PDF
+- **Export to Word** (`.docx`) — the text of the PDF, with paragraphs, bold/italic and font sizes
+- **Export to JPG** — saves every page as an image (`1.jpg`, `2.jpg`, …) in a new folder named after the PDF
+- On macOS every action is also in the menu bar (File, Edit, View, Faqet)
 - Open via `⌘O`, drag & drop, the Dock icon, or Finder's *Open With*
-- Read-only — never modifies your files
 - No tracking, no accounts, no network access
 
 The macOS app is native (SwiftUI + PDFKit); the Windows app is built with Electron and [pdf.js](https://mozilla.github.io/pdf.js/) and has the same features.
@@ -39,6 +44,10 @@ The macOS app is native (SwiftUI + PDFKit); the Windows app is built with Electr
 | Actual size | `⌘0` | `Ctrl+0` |
 | Rotate left / right | `⌘L` / `⌘R` | `Ctrl+L` / `Ctrl+R` |
 | Full screen | `⌃⌘F` | `F11` |
+| Export pages to JPG | `⌘E` | `Ctrl+E` |
+| Save / Save As | `⌘S` / `⌘⇧S` | `Ctrl+S` / `Ctrl+Shift+S` |
+| Undo | `⌘Z` | `Ctrl+Z` |
+| Show / hide thumbnails | `⌃⌘S` | |
 | Search | `⌘F` | `Ctrl+F` (`Enter` / `Shift+Enter` for next / previous) |
 
 ## Install
@@ -85,12 +94,15 @@ npm run dist:arm64   # same for Windows on ARM
 
 ```
 Sources/PDFReader/
-  PDFReaderApp.swift   App entry, menu commands, file opening
-  TabsModel.swift      Open documents / tabs
+  PDFReaderApp.swift   App entry, file opening, quit confirmation
+  MenuCommands.swift   File / Edit / View / Faqet menu bar items
+  TabsModel.swift      Open documents / tabs, unsaved-changes prompts
   TopBar.swift         Tab strip with overflow + toolbar controls
   ContentView.swift    Window layout, empty state, drag & drop
-  PDFViewModel.swift   Navigation, zoom, fit modes, layouts, rotation, search
-  PDFKitViews.swift    PDFView / thumbnail wrappers
+  PDFViewModel.swift   Navigation, zoom, layouts, search, page edits, undo, save, export
+  ThumbnailSidebar.swift  Thumbnails: reorder by drag, page context menu
+  WordExport.swift     PDF text → paragraphs → .docx
+  PDFKitViews.swift    PDFView wrapper
   WindowChrome.swift   Hidden title bar, traffic light positioning
 Resources/             Info.plist, app icon
 Tools/make_icon.swift  Draws the app icon

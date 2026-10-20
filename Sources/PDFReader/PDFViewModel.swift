@@ -1,8 +1,33 @@
 import SwiftUI
 import PDFKit
+import UniformTypeIdentifiers
 
 enum FitMode {
     case width, page, custom
+}
+
+/// A running export, e.g. ("Duke eksportuar", 3, 10).
+struct ExportProgress {
+    var label: String
+    var done: Int
+    var total: Int
+}
+
+/// The document before an edit, for undo.
+private struct Snapshot {
+    let data: Data
+    let version: Int
+}
+
+/// An edit could not be applied; shown to the user as is.
+struct EditError: LocalizedError {
+    let title: String
+    let detail: String
+    var errorDescription: String? { detail }
+
+    static let protected = EditError(
+        title: "Ky PDF është i mbrojtur",
+        detail: "PDF-të e mbrojtura me fjalëkalim ose me kufizime nuk mund të ndryshohen.")
 }
 
 enum PageLayout: String, CaseIterable, Identifiable {
@@ -37,14 +62,27 @@ enum PageLayout: String, CaseIterable, Identifiable {
     }
 }
 
-/// Owns the PDFView so toolbar actions can drive it.
+/// Owns the PDFView so toolbar actions can drive it, and the edits made to the document.
 @MainActor
 final class PDFViewModel: ObservableObject {
+    static let undoLimit = 30
+
     let pdfView = PDFView()
+    /// Where the PDF is saved; changes with "Ruaj si".
+    @Published private(set) var url: URL
 
     @Published var currentPage = 1
     @Published var pageCount = 0
     @Published var searchText = ""
+    /// Pages done so far while exporting; nil when no export is running.
+    @Published private(set) var exportProgress: ExportProgress?
+    /// Bumps on every change of the document's pages, so thumbnails redraw.
+    @Published private(set) var revision = 0
+    // Every edit gets a new version; the document is unsaved while it differs from the saved one
+    @Published private var version = 0
+    @Published private var savedVersion = 0
+    @Published private var history: [Snapshot] = []
+    private var nextVersion = 1
     @Published private(set) var fitMode = FitMode.width
     @Published var layout = PageLayout.continuous {
         didSet {
@@ -59,7 +97,14 @@ final class PDFViewModel: ObservableObject {
     private var searchIndex = 0
     private var observers: [NSObjectProtocol] = []
 
-    init(document: PDFDocument) {
+    var isDirty: Bool { version != savedVersion }
+    var canUndo: Bool { !history.isEmpty && canEdit }
+    /// Edits wait while an export reads the document.
+    var canEdit: Bool { exportProgress == nil }
+    var baseName: String { url.deletingPathExtension().lastPathComponent }
+
+    init(document: PDFDocument, url: URL) {
+        self.url = url
         pdfView.document = document
         pdfView.autoScales = true
         pdfView.displayMode = layout.displayMode
@@ -151,15 +196,440 @@ final class PDFViewModel: ObservableObject {
 
     // MARK: Rotation
 
+    /// Rotates all pages; saved into the file like any other edit.
     func rotate(by degrees: Int) {
-        guard let doc = pdfView.document else { return }
-        let current = pdfView.currentPage
-        for i in 0..<doc.pageCount {
-            doc.page(at: i)?.rotation += degrees
+        applyEdit { doc in
+            for i in 0..<doc.pageCount {
+                if let page = doc.page(at: i) { Self.rotate(page, by: degrees) }
+            }
         }
+    }
+
+    nonisolated private static func rotate(_ page: PDFPage, by degrees: Int) {
+        page.rotation = ((page.rotation + degrees) % 360 + 360) % 360
+    }
+
+    // MARK: Export
+
+    /// Saves every page as 1.jpg, 2.jpg, … in a new folder named after the PDF.
+    func exportJPEG() {
+        exportToFolder(message: "Zgjidh ku të krijohet dosja me imazhet JPG", label: "Duke eksportuar") { page, number in
+            ("\(number).jpg", try Self.jpegData(for: page))
+        }
+    }
+
+    /// Saves every page as 1.pdf, 2.pdf, … in a new folder named after the PDF.
+    func splitPages() {
+        guard ensureEditable() else { return }
+        exportToFolder(message: "Zgjidh ku të krijohet dosja me faqet PDF", label: "Duke ndarë") { page, number in
+            let single = PDFDocument()
+            guard let copy = page.copy() as? PDFPage else { throw CocoaError(.fileWriteUnknown) }
+            single.insert(copy, at: 0)
+            guard let data = single.dataRepresentation() else { throw CocoaError(.fileWriteUnknown) }
+            return ("\(number).pdf", data)
+        }
+    }
+
+    /// Creates a folder named after the PDF and writes one file per page into it.
+    private func exportToFolder(
+        message: String, label: String,
+        file: @escaping @Sendable (PDFPage, Int) throws -> (name: String, data: Data)
+    ) {
+        guard canEdit, let source = exportSource() else { return }
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = "Eksporto"
+        panel.message = message
+        guard panel.runModal() == .OK, let parent = panel.url else { return }
+
+        let folder: URL
+        do {
+            folder = try Self.makeFolder(in: parent, named: baseName)
+        } catch {
+            showExportError(error)
+            return
+        }
+
+        let total = pageCount
+        exportProgress = ExportProgress(label: label, done: 0, total: total)
+
+        Task { [weak self] in
+            do {
+                try await Self.writePages(of: source, to: folder, file: file) { done in
+                    self?.exportProgress?.done = done
+                }
+                self?.exportProgress = nil
+                NSWorkspace.shared.open(folder)
+            } catch {
+                self?.exportProgress = nil
+                self?.showExportError(error)
+            }
+        }
+    }
+
+    /// Exports read a separate copy of the document, so the visible one stays untouched.
+    enum ExportSource: Sendable {
+        case file(URL)
+        case data(Data)
+
+        nonisolated func open() -> PDFDocument? {
+            switch self {
+            case .file(let url): PDFDocument(url: url)
+            case .data(let data): PDFDocument(data: data)
+            }
+        }
+    }
+
+    /// The saved file when nothing changed (also works for protected PDFs), otherwise the edited document.
+    private func exportSource() -> ExportSource? {
+        if !isDirty { return .file(url) }
+        guard let data = pdfView.document?.dataRepresentation() else {
+            showExportError(CocoaError(.fileWriteUnknown))
+            return nil
+        }
+        return .data(data)
+    }
+
+    /// Renders off the main thread.
+    nonisolated private static func writePages(
+        of source: ExportSource, to folder: URL,
+        file: @Sendable (PDFPage, Int) throws -> (name: String, data: Data),
+        progress: @escaping @MainActor @Sendable (Int) -> Void
+    ) async throws {
+        guard let copy = source.open() else { throw CocoaError(.fileReadCorruptFile) }
+        for index in 0..<copy.pageCount {
+            guard let page = copy.page(at: index) else { continue }
+            let output = try file(page, index + 1)
+            try output.data.write(to: folder.appendingPathComponent(output.name))
+            await progress(index + 1)
+        }
+    }
+
+    /// Creates "name", or "name 2", "name 3", … when that folder already exists.
+    private static func makeFolder(in parent: URL, named name: String) throws -> URL {
+        var folder = parent.appendingPathComponent(name, isDirectory: true)
+        var number = 2
+        while FileManager.default.fileExists(atPath: folder.path) {
+            folder = parent.appendingPathComponent("\(name) \(number)", isDirectory: true)
+            number += 1
+        }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        return folder
+    }
+
+    /// Renders the page at 144 DPI on white, as JPEG.
+    nonisolated private static func jpegData(for page: PDFPage, scale: CGFloat = 2) throws -> Data {
+        let box = page.bounds(for: .cropBox)
+        let rotation = (page.rotation % 360 + 360) % 360
+        var size = box.size
+        if rotation % 180 != 0 { size = CGSize(width: size.height, height: size.width) }
+        let width = Int((size.width * scale).rounded()), height = Int((size.height * scale).rounded())
+
+        guard width > 0, height > 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { throw CocoaError(.fileWriteUnknown) }
+
+        context.setFillColor(.white)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: scale, y: scale)
+        // Page rotation is clockwise; CoreGraphics angles are counterclockwise
+        switch rotation {
+        case 90:
+            context.translateBy(x: 0, y: box.width)
+            context.rotate(by: -.pi / 2)
+        case 180:
+            context.translateBy(x: box.width, y: box.height)
+            context.rotate(by: .pi)
+        case 270:
+            context.translateBy(x: box.height, y: 0)
+            context.rotate(by: .pi / 2)
+        default:
+            break
+        }
+        context.translateBy(x: -box.minX, y: -box.minY)
+        // Rotation is applied above, so draw the page unrotated
+        page.rotation = 0
+        page.draw(with: .cropBox, to: context)
+
+        let data = NSMutableData()
+        guard let image = context.makeImage(),
+              let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil)
+        else { throw CocoaError(.fileWriteUnknown) }
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+        return data as Data
+    }
+
+    private func showExportError(_ error: Error) {
+        showError("Eksportimi dështoi", error.localizedDescription)
+    }
+
+    func showError(_ title: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.runModal()
+    }
+
+    // MARK: Editing
+
+    /// Encrypted PDFs can't be written back without losing their protection, so they stay read-only.
+    private func ensureEditable() -> Bool {
+        guard let doc = pdfView.document else { return false }
+        if doc.isEncrypted || doc.isLocked || !doc.allowsDocumentChanges {
+            showError(EditError.protected.title, EditError.protected.detail)
+            return false
+        }
+        return true
+    }
+
+    /// Changes the document in place; the previous state goes on the undo stack.
+    /// `pageAfter` is the page (1-based) to show afterwards.
+    private func applyEdit(pageAfter: Int? = nil, _ change: (PDFDocument) throws -> Void) {
+        guard canEdit, ensureEditable(), let doc = pdfView.document else { return }
+        guard let before = doc.dataRepresentation() else {
+            showError("Ndryshimi dështoi", "PDF-ja nuk mund të lexohet.")
+            return
+        }
+        do {
+            try change(doc)
+        } catch let error as EditError {
+            showError(error.title, error.detail)
+            return
+        } catch {
+            showError("Ndryshimi dështoi", error.localizedDescription)
+            return
+        }
+        history.append(Snapshot(data: before, version: version))
+        if history.count > Self.undoLimit { history.removeFirst() }
+        version = nextVersion
+        nextVersion += 1
+        documentChanged(page: pageAfter ?? currentPage)
+    }
+
+    func undo() {
+        guard canUndo, let snapshot = history.popLast(), let doc = PDFDocument(data: snapshot.data) else { return }
+        let page = currentPage
+        pdfView.document = doc
+        pdfView.displayMode = layout.displayMode
+        version = snapshot.version
+        documentChanged(page: page)
+    }
+
+    /// Shows the changed pages and keeps the view where the user was.
+    private func documentChanged(page: Int) {
+        guard let doc = pdfView.document else { return }
+        pageCount = doc.pageCount
         pdfView.layoutDocumentView()
         applyFit()
-        if let current { pdfView.go(to: current) }
+        goToPage(page)
+        updateCurrentPage()
+        revision += 1
+        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty { search() }
+    }
+
+    // Page numbers below are 1-based, like in the UI
+
+    func deletePage(_ number: Int) {
+        guard pageCount > 1 else {
+            showError("Faqja nuk mund të fshihet", "PDF-ja duhet të ketë të paktën një faqe.")
+            return
+        }
+        applyEdit(pageAfter: number) { $0.removePage(at: number - 1) }
+    }
+
+    func rotatePage(_ number: Int, by degrees: Int) {
+        applyEdit(pageAfter: number) { doc in
+            if let page = doc.page(at: number - 1) { Self.rotate(page, by: degrees) }
+        }
+    }
+
+    /// Moves a page so that it ends up at position `to`.
+    func movePage(_ from: Int, to: Int) {
+        guard from != to else { return }
+        applyEdit(pageAfter: to) { doc in
+            guard let page = doc.page(at: from - 1) else { return }
+            doc.removePage(at: from - 1)
+            doc.insert(page, at: to - 1)
+        }
+    }
+
+    /// Inserts an empty page with the size of the page before it.
+    func insertBlankPage(after: Int) {
+        applyEdit(pageAfter: after + 1) { doc in
+            guard let reference = doc.page(at: max(0, after - 1)) else { return }
+            var size = reference.bounds(for: .mediaBox).size
+            if reference.rotation % 180 != 0 { size = CGSize(width: size.height, height: size.width) }
+            let page = PDFPage()
+            page.setBounds(CGRect(origin: .zero, size: size), for: .mediaBox)
+            page.setBounds(CGRect(origin: .zero, size: size), for: .cropBox)
+            doc.insert(page, at: after)
+        }
+    }
+
+    /// Lets the user pick PDFs and inserts their pages after page `after` (0 = at the start).
+    func insertPDFs(after: Int, message: String) {
+        guard canEdit, ensureEditable() else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = true
+        panel.message = message
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+
+        applyEdit(pageAfter: after + 1) { doc in
+            var sources: [PDFDocument] = []
+            for url in panel.urls {
+                guard let source = PDFDocument(url: url) else {
+                    throw EditError(title: "Skedari nuk mund të hapet", detail: url.lastPathComponent)
+                }
+                if source.isLocked { throw EditError.protected }
+                sources.append(source)
+            }
+            var at = after
+            for source in sources {
+                for i in 0..<source.pageCount {
+                    guard let page = source.page(at: i)?.copy() as? PDFPage else { continue }
+                    doc.insert(page, at: at)
+                    at += 1
+                }
+            }
+        }
+    }
+
+    func mergePDFs() {
+        insertPDFs(after: pageCount, message: "Zgjidh PDF-të që do të bashkohen")
+    }
+
+    /// Asks which pages to keep and saves them as a new PDF.
+    func extractPagesPrompt(defaultValue: String? = nil) {
+        guard canEdit, ensureEditable(), let doc = pdfView.document else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Nxirr faqet"
+        alert.informativeText = "Shkruaj faqet që do të ruhen në një PDF të ri, p.sh. 1-3, 5 (gjithsej \(pageCount) faqe)."
+        alert.addButton(withTitle: "Nxirr")
+        alert.addButton(withTitle: "Anulo")
+        let field = NSTextField(string: defaultValue ?? "\(currentPage)")
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let text = field.stringValue
+        guard let indexes = Self.parsePageRanges(text, pageCount: pageCount) else {
+            showError("Faqet nuk janë të sakta", "Shkruaj numra nga 1 deri në \(pageCount), p.sh. 1-3, 5")
+            return
+        }
+        let extracted = PDFDocument()
+        for index in indexes {
+            if let page = doc.page(at: index)?.copy() as? PDFPage {
+                extracted.insert(page, at: extracted.pageCount)
+            }
+        }
+        let name = "\(baseName) (faqet \(text.filter { !$0.isWhitespace })).pdf"
+        guard let target = askSaveURL(name: name, type: .pdf, message: "Ruaj faqet e nxjerra") else { return }
+        guard let data = extracted.dataRepresentation() else {
+            showError("PDF-ja nuk mund të ruhet", "Faqet nuk mund të shkruhen.")
+            return
+        }
+        write(data, to: target)
+    }
+
+    /// Parses "1-3, 5, 8-" into 0-based page indexes, or returns nil when invalid.
+    /// "8-" means "from page 8 to the end".
+    nonisolated static func parsePageRanges(_ text: String, pageCount: Int) -> [Int]? {
+        var indexes: [Int] = []
+        let parts = text.split(whereSeparator: { $0 == "," || $0 == ";" || $0.isWhitespace })
+        for part in parts {
+            let bounds = part.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+                .map { $0.replacingOccurrences(of: "–", with: "") }
+            let ends = part.contains("-") ? bounds : [String(part)]
+            guard let start = Int(ends[0]) else { return nil }
+            let end = ends.count == 1 ? start : ends[1].isEmpty ? pageCount : Int(ends[1])
+            guard let end, start >= 1, end <= pageCount, start <= end else { return nil }
+            indexes += (start - 1)..<end
+        }
+        return indexes.isEmpty ? nil : indexes
+    }
+
+    // MARK: Saving
+
+    /// Writes back to the file; returns false when it failed.
+    @discardableResult
+    func save() -> Bool {
+        guard isDirty else { return true }
+        guard let data = pdfView.document?.dataRepresentation(), write(data, to: url) else { return false }
+        savedVersion = version
+        return true
+    }
+
+    @discardableResult
+    func saveAs() -> Bool {
+        guard let data = pdfView.document?.dataRepresentation(),
+              let target = askSaveURL(name: url.lastPathComponent, type: .pdf, message: "Ruaj si"),
+              write(data, to: target)
+        else { return false }
+        url = target
+        savedVersion = version
+        NSDocumentController.shared.noteNewRecentDocumentURL(target)
+        // The tab title shows the new name
+        TabsModel.shared.objectWillChange.send()
+        return true
+    }
+
+    private func askSaveURL(name: String, type: UTType, message: String) -> URL? {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [type]
+        panel.nameFieldStringValue = name
+        panel.message = message
+        panel.canCreateDirectories = true
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// Atomic, so a failed save never leaves a half-written file.
+    @discardableResult
+    private func write(_ data: Data, to target: URL) -> Bool {
+        do {
+            try data.write(to: target, options: .atomic)
+            return true
+        } catch {
+            showError("Skedari nuk mund të ruhet", error.localizedDescription)
+            return false
+        }
+    }
+
+    // MARK: Word
+
+    /// Saves the text of the PDF as a Word document.
+    func exportWord() {
+        guard canEdit, let source = exportSource() else { return }
+        exportProgress = ExportProgress(label: "Duke përgatitur Word", done: 0, total: pageCount)
+
+        Task { [weak self] in
+            let document = await WordExport.extract(from: source) { done in
+                self?.exportProgress?.done = done
+            }
+            guard let self else { return }
+            exportProgress = nil
+            guard let document else {
+                showError("Eksportimi në Word dështoi", "PDF-ja nuk mund të lexohet.")
+                return
+            }
+            guard document.hasText else {
+                showError("Ky PDF nuk ka tekst",
+                          "Faqet janë ndoshta imazhe të skanuara, prandaj nuk ka tekst për ta kaluar në Word.")
+                return
+            }
+            guard let target = askSaveURL(name: "\(baseName).docx", type: WordExport.docxType, message: "Eksporto në Word"),
+                  write(WordExport.docx(document), to: target)
+            else { return }
+            NSWorkspace.shared.open(target)
+        }
     }
 
     // MARK: Search

@@ -1,13 +1,14 @@
 {
   "name": "pdf-reader-free",
   "productName": "PDF Reader",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "A simple, fast and free PDF viewer",
   "author": "Marsel Preci",
   "license": "MIT",
   "private": true,
   "main": "src/main.js",
   "dependencies": {
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.4.299"
   },
   "devDependencies": {
@@ -17,7 +18,8 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win --x64",
-    "dist:arm64": "electron-builder --win --arm64"
+    "dist:arm64": "electron-builder --win --arm64",
+    "dist:mac": "electron-builder --mac --dir"
   },
   "build": {
     "appId": "al.preci.pdfreaderfree",
@@ -43,6 +45,15 @@
         "role": "Viewer"
       }
     ],
+    "mac": {
+      "icon": "src/icon.png",
+      "category": "public.app-category.productivity",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "target": [
+        "dir"
+      ]
+    },
     "win": {
       "icon": "src/icon.png",
       "target": [

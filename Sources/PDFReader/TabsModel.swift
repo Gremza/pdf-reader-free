@@ -2,17 +2,16 @@ import SwiftUI
 import PDFKit
 import UniformTypeIdentifiers
 
+@MainActor
 final class DocumentTab: Identifiable {
     let id = UUID()
-    let url: URL
     let model: PDFViewModel
 
+    var url: URL { model.url }
     var title: String { url.lastPathComponent }
 
-    @MainActor
     init(url: URL, document: PDFDocument) {
-        self.url = url
-        self.model = PDFViewModel(document: document)
+        self.model = PDFViewModel(document: document, url: url)
     }
 }
 
@@ -24,6 +23,7 @@ final class TabsModel: ObservableObject {
     @Published private(set) var tabs: [DocumentTab] = []
     @Published var selectedID: DocumentTab.ID?
     @Published var isFullScreen = false
+    @Published var showThumbnails = true
     weak var window: NSWindow?
 
     var selected: DocumentTab? { tabs.first { $0.id == selectedID } }
@@ -66,8 +66,25 @@ final class TabsModel: ObservableObject {
 
     // MARK: Tabs
 
+    /// Asks to save unsaved changes first; does nothing when the user cancels.
     func close(_ id: DocumentTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = tabs[index]
+        if tab.model.isDirty {
+            selectedID = id
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Të ruhen ndryshimet në \"\(tab.title)\"?"
+            alert.informativeText = "Nëse nuk i ruan, ndryshimet humbasin."
+            alert.addButton(withTitle: "Ruaj")
+            alert.addButton(withTitle: "Mos ruaj")
+            alert.addButton(withTitle: "Anulo")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn: guard tab.model.save() else { return }
+            case .alertSecondButtonReturn: break
+            default: return
+            }
+        }
         tabs.remove(at: index)
         if selectedID == id {
             selectedID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
@@ -93,6 +110,24 @@ final class TabsModel: ObservableObject {
     }
 
     // MARK: Window
+
+    private var discardConfirmed = false
+
+    /// Before the window closes or the app quits; false when the user wants to keep the changes.
+    func confirmDiscardChanges() -> Bool {
+        let count = tabs.filter(\.model.isDirty).count
+        guard count > 0, !discardConfirmed else { return true }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = count == 1
+            ? "Një dokument ka ndryshime të paruajtura"
+            : "\(count) dokumente kanë ndryshime të paruajtura"
+        alert.informativeText = "Nëse mbyll tani, ndryshimet humbasin."
+        alert.addButton(withTitle: "Anulo")
+        alert.addButton(withTitle: "Mbyll pa ruajtur")
+        discardConfirmed = alert.runModal() == .alertSecondButtonReturn
+        return discardConfirmed
+    }
 
     func toggleFullScreen() {
         window?.toggleFullScreen(nil)

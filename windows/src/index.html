@@ -73,7 +73,15 @@
         </div>
       </div>
 
-      <button id="fullscreen" class="bar-button" title="Ekran i plotë (F11)" aria-label="Ekran i plotë">
+      <button id="document-button" class="bar-button" title="Faqet, ruajtja dhe eksporti" aria-label="Dokumenti" aria-haspopup="menu">
+        <svg viewBox="0 0 24 24"><path d="M8 3h8l4 4v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M16 3v4h4M4 7v13a2 2 0 0 0 2 2h10"/><path d="M10 13h6M13 10v6"/></svg>
+      </button>
+
+      <button id="export-jpg" class="bar-button" title="Eksporto çdo faqe si imazh JPG (Ctrl+E)" aria-label="Eksporto si JPG">
+        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="15" height="13" rx="2"/><circle cx="8" cy="9.5" r="1.5"/><path d="m3 16 4-4 4 4 3-3 4 4M21 9v11a1 1 0 0 1-1 1H7"/></svg>
+      </button>
+
+      <button id="fullscreen"class="bar-button" title="Ekran i plotë (F11)" aria-label="Ekran i plotë">
         <svg class="enter" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
         <svg class="exit" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
       </button>
@@ -94,7 +102,23 @@
       <p>Tërhiq një ose më shumë PDF këtu</p>
       <button id="open-button" class="primary-button">Hap PDF…</button>
     </section>
+    <div id="export-progress" class="export-progress" role="status" hidden>
+      <progress id="export-bar"></progress>
+      <span id="export-label"></span>
+    </div>
   </main>
+
+  <dialog id="prompt-dialog" class="prompt-dialog">
+    <form method="dialog">
+      <h2></h2>
+      <p></p>
+      <input id="prompt-field" class="field" autocomplete="off" spellcheck="false">
+      <div class="dialog-buttons">
+        <button value="cancel" class="secondary-button" formnovalidate>Anulo</button>
+        <button value="ok" class="primary-button"></button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="renderer.js"></script>
 </body>

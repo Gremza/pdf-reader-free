@@ -29,6 +29,11 @@ struct WindowChrome: NSViewRepresentable {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.tabbingMode = .disallowed
+            // The close button asks about unsaved changes first
+            if let close = window.standardWindowButton(.closeButton) {
+                close.target = self
+                close.action = #selector(closeWindow)
+            }
 
             let center = NotificationCenter.default
             let relayout: [Notification.Name] = [
@@ -49,6 +54,11 @@ struct WindowChrome: NSViewRepresentable {
                 })
             }
             DispatchQueue.main.async { [weak self] in self?.positionTrafficLights() }
+        }
+
+        @objc private func closeWindow() {
+            guard MainActor.assumeIsolated({ tabs.confirmDiscardChanges() }) else { return }
+            window?.close()
         }
 
         private func positionTrafficLights() {

@@ -5,19 +5,18 @@ struct TopBar: View {
     static let height: CGFloat = 40
 
     @EnvironmentObject private var tabs: TabsModel
-    @Binding var showThumbnails: Bool
 
     var body: some View {
         HStack(spacing: 6) {
             Color.clear.frame(width: tabs.isFullScreen ? 4 : 72)
 
             Button {
-                withAnimation { showThumbnails.toggle() }
+                withAnimation { tabs.showThumbnails.toggle() }
             } label: {
                 Label("Miniaturat", systemImage: "sidebar.left")
             }
             .buttonStyle(BarButtonStyle())
-            .help("Shfaq/fshih miniaturat")
+            .help("Shfaq/fshih miniaturat (⌃⌘S)")
             .disabled(tabs.selected == nil)
 
             TabStrip()
@@ -48,7 +47,7 @@ private struct TabStrip: View {
             let layout = layout(for: geo.size.width)
             HStack(spacing: 2) {
                 ForEach(layout.visible) { tab in
-                    TabItem(tab: tab, isSelected: tab.id == tabs.selectedID, width: layout.tabWidth)
+                    TabItem(tab: tab, model: tab.model, isSelected: tab.id == tabs.selectedID, width: layout.tabWidth)
                 }
 
                 if !layout.hidden.isEmpty {
@@ -110,6 +109,8 @@ private struct TabStrip: View {
 private struct TabItem: View {
     @EnvironmentObject private var tabs: TabsModel
     let tab: DocumentTab
+    /// Observed for the unsaved-changes dot
+    @ObservedObject var model: PDFViewModel
     let isSelected: Bool
     let width: CGFloat
     @State private var isHovering = false
@@ -119,7 +120,7 @@ private struct TabItem: View {
             Image(systemName: "doc.fill")
                 .font(.system(size: 11))
                 .foregroundStyle(.red)
-            Text(tab.title)
+            Text((model.isDirty ? "● " : "") + tab.title)
                 .font(.system(size: 12, weight: isSelected ? .medium : .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -168,7 +169,7 @@ private struct DocumentControls: View {
             Button(action: model.previousPage) {
                 Label("Faqja e mëparshme", systemImage: "chevron.up")
             }
-            .keyboardShortcut(.upArrow, modifiers: .command)
+            .help("Faqja e mëparshme (⌘↑)")
             .disabled(model.currentPage <= 1)
 
             TextField("", text: $pageField)
@@ -188,7 +189,7 @@ private struct DocumentControls: View {
             Button(action: model.nextPage) {
                 Label("Faqja tjetër", systemImage: "chevron.down")
             }
-            .keyboardShortcut(.downArrow, modifiers: .command)
+            .help("Faqja tjetër (⌘↓)")
             .disabled(model.currentPage >= model.pageCount)
 
             BarDivider()
@@ -196,13 +197,11 @@ private struct DocumentControls: View {
             Button(action: model.zoomOut) {
                 Label("Zvogëlo", systemImage: "minus.magnifyingglass")
             }
-            .keyboardShortcut("-", modifiers: .command)
             .help("Zvogëlo (⌘−)")
 
             Button(action: model.zoomIn) {
                 Label("Zmadho", systemImage: "plus.magnifyingglass")
             }
-            .keyboardShortcut("+", modifiers: .command)
             .help("Zmadho (⌘+)")
 
             BarDivider()
@@ -211,20 +210,17 @@ private struct DocumentControls: View {
                 Label("Gjerësia e plotë", systemImage: "arrow.left.and.right.square")
             }
             .symbolVariant(model.fitMode == .width ? .fill : .none)
-            .keyboardShortcut("1", modifiers: .command)
             .help("Gjerësia e plotë (⌘1)")
 
             Button(action: model.fitPage) {
                 Label("Faqja e plotë", systemImage: "arrow.up.and.down.square")
             }
             .symbolVariant(model.fitMode == .page ? .fill : .none)
-            .keyboardShortcut("2", modifiers: .command)
             .help("Faqja e plotë (⌘2)")
 
             Button(action: model.actualSize) {
                 Label("Madhësia reale", systemImage: "1.magnifyingglass")
             }
-            .keyboardShortcut("0", modifiers: .command)
             .help("Madhësia reale 100% (⌘0)")
 
             Menu {
@@ -242,14 +238,12 @@ private struct DocumentControls: View {
                 } label: {
                     Label("Rrotullo majtas", systemImage: "rotate.left")
                 }
-                .keyboardShortcut("l", modifiers: .command)
 
                 Button {
                     model.rotate(by: 90)
                 } label: {
                     Label("Rrotullo djathtas", systemImage: "rotate.right")
                 }
-                .keyboardShortcut("r", modifiers: .command)
             } label: {
                 Image(systemName: model.layout.systemImage)
             }
@@ -257,6 +251,24 @@ private struct DocumentControls: View {
             .frame(width: 40)
             .help("Mënyra e shfaqjes dhe rrotullimi")
             .accessibilityLabel("Pamja")
+
+            Menu {
+                DocumentMenu(model: model)
+            } label: {
+                Image(systemName: "doc.badge.gearshape")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 32)
+            .disabled(!model.canEdit)
+            .help("Faqet, ruajtja dhe eksporti")
+            .accessibilityLabel("Dokumenti")
+
+            Button(action: model.exportJPEG) {
+                Label("Eksporto si JPG", systemImage: "photo.on.rectangle")
+            }
+            .disabled(model.exportProgress != nil)
+            .help("Eksporto çdo faqe si imazh JPG (⌘E)")
 
             Button(action: tabs.toggleFullScreen) {
                 Label(tabs.isFullScreen ? "Dil nga ekrani i plotë" : "Ekran i plotë",
@@ -286,6 +298,37 @@ private struct DocumentControls: View {
         .buttonStyle(BarButtonStyle())
         .onAppear { pageField = "\(model.currentPage)" }
         .onChange(of: model.currentPage) { pageField = "\(model.currentPage)" }
+    }
+}
+
+/// Page edits for the current page, saving and export.
+private struct DocumentMenu: View {
+    @ObservedObject var model: PDFViewModel
+
+    var body: some View {
+        let n = model.currentPage
+        Button("Ruaj") { model.save() }
+            .disabled(!model.isDirty)
+        Button("Ruaj si…") { model.saveAs() }
+        Button("Zhbëj", action: model.undo)
+            .disabled(!model.canUndo)
+        Divider()
+        Button("Shto faqe bosh pas faqes \(n)") { model.insertBlankPage(after: n) }
+        Button("Shto faqe nga PDF pas faqes \(n)…") {
+            model.insertPDFs(after: n, message: "Zgjidh PDF-të që do të shtohen")
+        }
+        Button("Bashko PDF në fund…", action: model.mergePDFs)
+        Button("Fshi faqen \(n)") { model.deletePage(n) }
+            .disabled(model.pageCount <= 1)
+        Divider()
+        Button("Rrotullo faqen \(n) majtas") { model.rotatePage(n, by: -90) }
+        Button("Rrotullo faqen \(n) djathtas") { model.rotatePage(n, by: 90) }
+        Divider()
+        Button("Nxirr faqet në PDF të ri…") { model.extractPagesPrompt() }
+        Button("Ndaj në faqe të veçanta…", action: model.splitPages)
+        Divider()
+        Button("Eksporto në Word…", action: model.exportWord)
+        Button("Eksporto si JPG…", action: model.exportJPEG)
     }
 }
 

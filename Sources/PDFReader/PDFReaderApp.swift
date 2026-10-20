@@ -20,6 +20,7 @@ struct PDFReaderApp: App {
                 Button("Mbyll tab-in") { tabs.closeSelected() }
                     .keyboardShortcut("w")
             }
+            DocumentCommands(tabs: tabs)
             CommandGroup(before: .windowArrangement) {
                 Button("Tab-i tjetër") { tabs.selectNext() }
                     .keyboardShortcut("]", modifiers: [.command, .shift])
@@ -43,5 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated { TabsModel.shared.confirmDiscardChanges() } ? .terminateNow : .terminateCancel
     }
 }
