@@ -9,6 +9,11 @@
   Një lexues PDF i thjeshtë, i shpejtë dhe falas për macOS dhe Windows.
 </p>
 
+<p align="center">
+  <a href="https://gremza.github.io/pdf-reader-free/"><b>Website & downloads</b></a> ·
+  <a href="../../releases/latest">Latest release</a>
+</p>
+
 ---
 
 ## Features

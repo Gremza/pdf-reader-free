@@ -22,6 +22,7 @@ The owner speaks Albanian. **All UI text is in Albanian** (labels, menus, alerts
 - The owner's keychain has **two identical "Apple Development" certificates**, so electron-builder signing with an identity fails as "ambiguous". The `mac` build config uses `identity: "-"` (ad-hoc) and `hardenedRuntime: false` for that reason.
 - Version numbers live in `Resources/Info.plist` (`CFBundleShortVersionString`, `CFBundleVersion`) and `windows/package.json` (`version`). Keep both in step.
 - Releases: GitHub `Gremza/pdf-reader-free`, published with `gh release create`. See the `release` skill.
+- Website: `docs/index.html` on GitHub Pages (https://gremza.github.io/pdf-reader-free/), served from `main` /docs. The download buttons pick their files from the latest release through the GitHub API, so a new release needs no page edit unless the features change. Keep its feature list in step with the README.
 
 ## macOS architecture (`Sources/PDFReader/`)
 
