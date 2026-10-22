@@ -29,13 +29,13 @@ APP=$S/PDFTest.app; rm -rf $APP; mkdir -p $APP/Contents/MacOS
 cp .build/debug/PDFReader $APP/Contents/MacOS/; cp Resources/Info.plist $APP/Contents/
 codesign --force --sign - $APP; cp some.pdf $S/ui.pdf; open -a $APP $S/ui.pdf
 P='tell application "System Events" to tell (first process whose name is "PDFReader")'
-osascript -e "$P to get {name, enabled} of menu items of menu 1 of menu bar item \"Faqet\" of menu bar 1"
-osascript -e "$P to click menu item \"Fshi faqen 1\" of menu 1 of menu bar item \"Faqet\" of menu bar 1"
+osascript -e "$P to get {name, enabled} of menu items of menu 1 of menu bar item \"Pages\" of menu bar 1"
+osascript -e "$P to click menu item \"Delete Page 1\" of menu 1 of menu bar item \"Pages\" of menu bar 1"
 osascript -e "$P to get value of attribute \"AXMenuItemMarkChar\" of menu items of menu 1 of menu bar item \"View\" of menu bar 1"
 ```
 
-- Alerts appear as `window 1`: read `value of static texts`, click `button "Anulo"`.
+- Alerts appear as `window 1`: read `value of static texts`, click `button "Cancel"`.
 - Thumbnails: `UI elements of UI element 1 of scroll area 1 of group 1 of window 1` (position/size per page; portrait vs landscape sizes reveal order after a drag).
 - Right-click / drag: `swiftc -o $S/mouse scripts/mouse.swift`, then `$S/mouse right X Y` or `$S/mouse drag X1 Y1 X2 Y2`. Context menus are read via `menus of UI element N of …`.
 - `screencapture` is not permitted on this machine — verify through accessibility instead, and tell the owner what could not be checked visually.
-- Quit with ⌘Q → "Mbyll pa ruajtur", then delete `$S/PDFTest.app`.
+- Quit with ⌘Q → "Close Without Saving", then delete `$S/PDFTest.app`.

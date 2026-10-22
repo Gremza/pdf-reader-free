@@ -13,10 +13,10 @@ struct TopBar: View {
             Button {
                 withAnimation { tabs.showThumbnails.toggle() }
             } label: {
-                Label("Miniaturat", systemImage: "sidebar.left")
+                Label("Thumbnails", systemImage: "sidebar.left")
             }
             .buttonStyle(BarButtonStyle())
-            .help("Shfaq/fshih miniaturat (⌃⌘S)")
+            .help("Show/hide thumbnails (⌃⌘S)")
             .disabled(tabs.selected == nil)
 
             TabStrip()
@@ -63,14 +63,14 @@ private struct TabStrip: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .frame(width: overflowWidth - 4)
-                    .help("Tabs të tjerë")
+                    .help("More tabs")
                 }
 
                 Button(action: tabs.showOpenPanel) {
-                    Label("Hap PDF", systemImage: "plus")
+                    Label("Open PDF", systemImage: "plus")
                 }
                 .buttonStyle(BarButtonStyle())
-                .help("Hap PDF (⌘O)")
+                .help("Open PDF (⌘O)")
             }
             .frame(maxHeight: .infinity)
         }
@@ -137,8 +137,8 @@ private struct TabItem: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .opacity(isSelected || isHovering ? 1 : 0)
-            .help("Mbyll tab-in (⌘W)")
-            .accessibilityLabel("Mbyll \(tab.title)")
+            .help("Close Tab (⌘W)")
+            .accessibilityLabel("Close \(tab.title)")
         }
         .padding(.horizontal, 8)
         .frame(width: width, height: 28)
@@ -167,9 +167,9 @@ private struct DocumentControls: View {
     var body: some View {
         HStack(spacing: 2) {
             Button(action: model.previousPage) {
-                Label("Faqja e mëparshme", systemImage: "chevron.up")
+                Label("Previous Page", systemImage: "chevron.up")
             }
-            .help("Faqja e mëparshme (⌘↑)")
+            .help("Previous Page (⌘↑)")
             .disabled(model.currentPage <= 1)
 
             TextField("", text: $pageField)
@@ -187,44 +187,44 @@ private struct DocumentControls: View {
                 .padding(.horizontal, 2)
 
             Button(action: model.nextPage) {
-                Label("Faqja tjetër", systemImage: "chevron.down")
+                Label("Next Page", systemImage: "chevron.down")
             }
-            .help("Faqja tjetër (⌘↓)")
+            .help("Next Page (⌘↓)")
             .disabled(model.currentPage >= model.pageCount)
 
             BarDivider()
 
             Button(action: model.zoomOut) {
-                Label("Zvogëlo", systemImage: "minus.magnifyingglass")
+                Label("Zoom Out", systemImage: "minus.magnifyingglass")
             }
-            .help("Zvogëlo (⌘−)")
+            .help("Zoom Out (⌘−)")
 
             Button(action: model.zoomIn) {
-                Label("Zmadho", systemImage: "plus.magnifyingglass")
+                Label("Zoom In", systemImage: "plus.magnifyingglass")
             }
-            .help("Zmadho (⌘+)")
+            .help("Zoom In (⌘+)")
 
             BarDivider()
 
             Button(action: model.fitWidth) {
-                Label("Gjerësia e plotë", systemImage: "arrow.left.and.right.square")
+                Label("Fit Width", systemImage: "arrow.left.and.right.square")
             }
             .symbolVariant(model.fitMode == .width ? .fill : .none)
-            .help("Gjerësia e plotë (⌘1)")
+            .help("Fit Width (⌘1)")
 
             Button(action: model.fitPage) {
-                Label("Faqja e plotë", systemImage: "arrow.up.and.down.square")
+                Label("Fit Page", systemImage: "arrow.up.and.down.square")
             }
             .symbolVariant(model.fitMode == .page ? .fill : .none)
-            .help("Faqja e plotë (⌘2)")
+            .help("Fit Page (⌘2)")
 
             Button(action: model.actualSize) {
-                Label("Madhësia reale", systemImage: "1.magnifyingglass")
+                Label("Actual Size", systemImage: "1.magnifyingglass")
             }
-            .help("Madhësia reale 100% (⌘0)")
+            .help("Actual Size 100% (⌘0)")
 
             Menu {
-                Picker("Pamja", selection: $model.layout) {
+                Picker("Layout", selection: $model.layout) {
                     ForEach(PageLayout.allCases) { layout in
                         Label(layout.title, systemImage: layout.systemImage).tag(layout)
                     }
@@ -236,21 +236,21 @@ private struct DocumentControls: View {
                 Button {
                     model.rotate(by: -90)
                 } label: {
-                    Label("Rrotullo majtas", systemImage: "rotate.left")
+                    Label("Rotate Left", systemImage: "rotate.left")
                 }
 
                 Button {
                     model.rotate(by: 90)
                 } label: {
-                    Label("Rrotullo djathtas", systemImage: "rotate.right")
+                    Label("Rotate Right", systemImage: "rotate.right")
                 }
             } label: {
                 Image(systemName: model.layout.systemImage)
             }
             .menuStyle(.borderlessButton)
             .frame(width: 40)
-            .help("Mënyra e shfaqjes dhe rrotullimi")
-            .accessibilityLabel("Pamja")
+            .help("Layout and rotation")
+            .accessibilityLabel("Layout")
 
             Menu {
                 DocumentMenu(model: model)
@@ -261,27 +261,27 @@ private struct DocumentControls: View {
             .menuIndicator(.hidden)
             .frame(width: 32)
             .disabled(!model.canEdit)
-            .help("Faqet, ruajtja dhe eksporti")
-            .accessibilityLabel("Dokumenti")
+            .help("Pages, saving and export")
+            .accessibilityLabel("Document")
 
             Button(action: model.exportJPEG) {
-                Label("Eksporto si JPG", systemImage: "photo.on.rectangle")
+                Label("Export as JPG", systemImage: "photo.on.rectangle")
             }
             .disabled(model.exportProgress != nil)
-            .help("Eksporto çdo faqe si imazh JPG (⌘E)")
+            .help("Export every page as a JPG image (⌘E)")
 
             Button(action: tabs.toggleFullScreen) {
-                Label(tabs.isFullScreen ? "Dil nga ekrani i plotë" : "Ekran i plotë",
+                Label(tabs.isFullScreen ? "Exit Full Screen" : "Full Screen",
                       systemImage: tabs.isFullScreen
                           ? "arrow.down.right.and.arrow.up.left"
                           : "arrow.up.left.and.arrow.down.right")
             }
             .keyboardShortcut("f", modifiers: [.command, .control])
-            .help("Ekran i plotë (⌃⌘F)")
+            .help("Full Screen (⌃⌘F)")
 
             BarDivider()
 
-            TextField("Kërko", text: $model.searchText)
+            TextField("Search", text: $model.searchText)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 150)
                 .focused($searchFocused)
@@ -307,28 +307,28 @@ private struct DocumentMenu: View {
 
     var body: some View {
         let n = model.currentPage
-        Button("Ruaj") { model.save() }
+        Button("Save") { model.save() }
             .disabled(!model.isDirty)
-        Button("Ruaj si…") { model.saveAs() }
-        Button("Zhbëj", action: model.undo)
+        Button("Save As…") { model.saveAs() }
+        Button("Undo", action: model.undo)
             .disabled(!model.canUndo)
         Divider()
-        Button("Shto faqe bosh pas faqes \(n)") { model.insertBlankPage(after: n) }
-        Button("Shto faqe nga PDF pas faqes \(n)…") {
-            model.insertPDFs(after: n, message: "Zgjidh PDF-të që do të shtohen")
+        Button("Insert Blank Page After Page \(n)") { model.insertBlankPage(after: n) }
+        Button("Insert Pages from PDF After Page \(n)…") {
+            model.insertPDFs(after: n, message: "Choose the PDFs to insert")
         }
-        Button("Bashko PDF në fund…", action: model.mergePDFs)
-        Button("Fshi faqen \(n)") { model.deletePage(n) }
+        Button("Merge PDFs at End…", action: model.mergePDFs)
+        Button("Delete Page \(n)") { model.deletePage(n) }
             .disabled(model.pageCount <= 1)
         Divider()
-        Button("Rrotullo faqen \(n) majtas") { model.rotatePage(n, by: -90) }
-        Button("Rrotullo faqen \(n) djathtas") { model.rotatePage(n, by: 90) }
+        Button("Rotate Page \(n) Left") { model.rotatePage(n, by: -90) }
+        Button("Rotate Page \(n) Right") { model.rotatePage(n, by: 90) }
         Divider()
-        Button("Nxirr faqet në PDF të ri…") { model.extractPagesPrompt() }
-        Button("Ndaj në faqe të veçanta…", action: model.splitPages)
+        Button("Extract Pages to New PDF…") { model.extractPagesPrompt() }
+        Button("Split into Single Pages…", action: model.splitPages)
         Divider()
-        Button("Eksporto në Word…", action: model.exportWord)
-        Button("Eksporto si JPG…", action: model.exportJPEG)
+        Button("Export to Word…", action: model.exportWord)
+        Button("Export as JPG…", action: model.exportJPEG)
     }
 }
 

@@ -11,10 +11,10 @@ const PDFJS = new URL("../node_modules/pdfjs-dist/", import.meta.url).href;
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "build/pdf.worker.mjs";
 
 const LAYOUTS = {
-  single: { scroll: ScrollMode.PAGE, spread: SpreadMode.NONE, title: "Një faqe" },
-  continuous: { scroll: ScrollMode.VERTICAL, spread: SpreadMode.NONE, title: "E vazhduar" },
-  twoUp: { scroll: ScrollMode.PAGE, spread: SpreadMode.ODD, title: "Dy faqe" },
-  twoUpContinuous: { scroll: ScrollMode.VERTICAL, spread: SpreadMode.ODD, title: "Dy faqe, e vazhduar" },
+  single: { scroll: ScrollMode.PAGE, spread: SpreadMode.NONE, title: "Single Page" },
+  continuous: { scroll: ScrollMode.VERTICAL, spread: SpreadMode.NONE, title: "Continuous" },
+  twoUp: { scroll: ScrollMode.PAGE, spread: SpreadMode.ODD, title: "Two Pages" },
+  twoUpContinuous: { scroll: ScrollMode.VERTICAL, spread: SpreadMode.ODD, title: "Two Pages, Continuous" },
 };
 
 const LAYOUT_ICONS = {
@@ -70,6 +70,9 @@ const el = {
   documents: $("documents"),
   emptyState: $("empty-state"),
   openButton: $("open-button"),
+  updatesButton: $("updates-button"),
+  updateProgress: $("update-progress"),
+  updateBar: $("update-bar"),
 };
 
 /** All open PDFs of the window, shown as tabs in the top bar. */
@@ -77,6 +80,8 @@ const state = {
   tabs: [],
   selected: null,
   showThumbnails: true,
+  // Update settings and whether a check is running, from the main process
+  updates: {},
 };
 
 let nextID = 1;
@@ -301,7 +306,7 @@ class DocumentTab {
 
   deletePage(number) {
     if (this.pageCount <= 1) {
-      window.host.showError("Faqja nuk mund të fshihet", "PDF-ja duhet të ketë të paktën një faqe.");
+      window.host.showError("The page can't be deleted", "A PDF must have at least one page.");
       return;
     }
     this.applyEdit((bytes) => pageEdits.remove(bytes, number - 1), number);
@@ -338,20 +343,20 @@ class DocumentTab {
   /** Asks which pages to keep and saves them as a new PDF. */
   async extractPagesPrompt(defaultValue = `${this.currentPage}`) {
     const text = await askText({
-      title: "Nxirr faqet",
-      message: `Shkruaj faqet që do të ruhen në një PDF të ri, p.sh. 1-3, 5 (gjithsej ${this.pageCount} faqe).`,
+      title: "Extract Pages",
+      message: `Enter the pages to save in a new PDF, e.g. 1-3, 5 (${this.pageCount} pages in total).`,
       value: defaultValue,
-      confirm: "Nxirr",
+      confirm: "Extract",
     });
     if (text === null) return;
     const indexes = parsePageRanges(text, this.pageCount);
     if (!indexes) {
-      window.host.showError("Faqet nuk janë të sakta", `Shkruaj numra nga 1 deri në ${this.pageCount}, p.sh. 1-3, 5`);
+      window.host.showError("Invalid pages", `Enter numbers from 1 to ${this.pageCount}, e.g. 1-3, 5`);
       return;
     }
     try {
       const bytes = await extractPages(this.bytes, indexes);
-      await window.host.saveAs(`${this.baseName} (faqet ${text.replace(/\s+/g, "")}).pdf`, bytes, "Ruaj faqet e nxjerra");
+      await window.host.saveAs(`${this.baseName} (pages ${text.replace(/\s+/g, "")}).pdf`, bytes, "Save Extracted Pages");
     } catch (error) {
       showEditError(error);
     }
@@ -366,7 +371,7 @@ class DocumentTab {
       showEditError(error);
       return;
     }
-    await this.exportToFolder("Zgjidh ku të krijohet dosja me faqet PDF", "Duke ndarë", async (number) => ({
+    await this.exportToFolder("Choose where to create the folder of PDF pages", "Splitting", async (number) => ({
       name: `${number}.pdf`,
       data: await extractPages(this.bytes, [number - 1]),
     }));
@@ -379,7 +384,7 @@ class DocumentTab {
     try {
       await window.host.saveFile(this.path, bytes);
     } catch (error) {
-      window.host.showError("PDF-ja nuk mund të ruhet", errorMessage(error));
+      window.host.showError("The PDF can't be saved", errorMessage(error));
       return false;
     }
     this.savedBytes = bytes;
@@ -391,9 +396,9 @@ class DocumentTab {
     const bytes = this.bytes;
     let path;
     try {
-      path = await window.host.saveAs(this.name, bytes, "Ruaj si");
+      path = await window.host.saveAs(this.name, bytes, "Save As");
     } catch (error) {
-      window.host.showError("PDF-ja nuk mund të ruhet", errorMessage(error));
+      window.host.showError("The PDF can't be saved", errorMessage(error));
       return false;
     }
     if (!path) return false;
@@ -423,7 +428,7 @@ class DocumentTab {
 
   /** Saves every page as 1.jpg, 2.jpg, … in a new folder named after the PDF. */
   exportJPEG() {
-    return this.exportToFolder("Zgjidh ku të krijohet dosja me imazhet JPG", "Duke eksportuar", async (number) => ({
+    return this.exportToFolder("Choose where to create the folder of JPG images", "Exporting", async (number) => ({
       name: `${number}.jpg`,
       data: await this.renderJPEG(number),
     }));
@@ -453,24 +458,24 @@ class DocumentTab {
   /** Saves the text of the PDF as a Word document. */
   async exportWord() {
     if (!this.canEdit) return;
-    this.startProgress("Duke përgatitur Word");
+    this.startProgress("Preparing Word");
     let document;
     try {
       document = await extractDocument(this.pdf, (n) => this.updateProgress(n));
     } catch (error) {
       this.endProgress();
-      window.host.showError("Eksportimi në Word dështoi", errorMessage(error));
+      window.host.showError("Word export failed", errorMessage(error));
       return;
     }
     this.endProgress();
     if (!hasText(document)) {
-      window.host.showError("Ky PDF nuk ka tekst", "Faqet janë ndoshta imazhe të skanuara, prandaj nuk ka tekst për ta kaluar në Word.");
+      window.host.showError("This PDF has no text", "The pages are probably scanned images, so there is no text to export to Word.");
       return;
     }
     try {
       await window.host.exportDocx(`${this.baseName}.docx`, document);
     } catch (error) {
-      window.host.showError("Eksportimi në Word dështoi", errorMessage(error));
+      window.host.showError("Word export failed", errorMessage(error));
     }
   }
 
@@ -499,7 +504,7 @@ class DocumentTab {
     try {
       await page.render({ canvas, canvasContext: canvas.getContext("2d"), viewport, background: "#ffffff" }).promise;
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
-      if (!blob) throw new Error(`Faqja ${pageNumber} nuk mund të ruhet`);
+      if (!blob) throw new Error(`Page ${pageNumber} can't be saved`);
       return new Uint8Array(await blob.arrayBuffer());
     } finally {
       canvas.width = canvas.height = 0;
@@ -527,7 +532,7 @@ class DocumentTab {
       const button = document.createElement("button");
       button.className = "thumb";
       button.dataset.page = n;
-      button.title = `Faqja ${n}`;
+      button.title = `Page ${n}`;
       button.draggable = true;
       const canvas = document.createElement("canvas");
       setThumbnailSize(canvas, viewport.width, viewport.height);
@@ -721,9 +726,9 @@ function errorMessage(error) {
 
 function showEditError(error) {
   if (error instanceof ProtectedPDFError) {
-    window.host.showError("Ky PDF është i mbrojtur", "PDF-të e mbrojtura me fjalëkalim ose me kufizime nuk mund të ndryshohen.");
+    window.host.showError("This PDF is protected", "PDFs protected by a password or restrictions can't be edited.");
   } else {
-    window.host.showError("Ndryshimi dështoi", errorMessage(error));
+    window.host.showError("Edit failed", errorMessage(error));
   }
 }
 
@@ -803,10 +808,10 @@ function tabElement(tab, width) {
   item.tabIndex = 0;
   item.setAttribute("role", "tab");
   item.setAttribute("aria-selected", tab === state.selected);
-  item.innerHTML = `${DOC_ICON}<span class="title"></span><button class="close" title="Mbyll tab-in (Ctrl+W)">${CLOSE_ICON}</button>`;
+  item.innerHTML = `${DOC_ICON}<span class="title"></span><button class="close" title="Close Tab (Ctrl+W)">${CLOSE_ICON}</button>`;
   // A dot marks unsaved changes, like in most editors
   item.querySelector(".title").textContent = (tab.isDirty ? "● " : "") + truncateMiddle(tab.name, width - (tab.isDirty ? 14 : 0));
-  item.querySelector(".close").setAttribute("aria-label", `Mbyll ${tab.name}`);
+  item.querySelector(".close").setAttribute("aria-label", `Close ${tab.name}`);
   item.querySelector(".close").addEventListener("click", (event) => {
     event.stopPropagation();
     close(tab);
@@ -881,6 +886,7 @@ function syncMenu() {
     showThumbnails: state.showThumbnails,
     canEdit: tab?.canEdit ?? false,
     isDirty: tab?.isDirty ?? false,
+    canUndo: (tab?.history.length ?? 0) > 0,
     currentPage: tab?.currentPage,
     pageCount: tab?.pageCount,
     fitMode: tab?.fitMode,
@@ -918,7 +924,7 @@ async function popup(items, x, y, run) {
   if (id) run[id]?.();
 }
 
-/** The "Dokumenti" button in the top bar. */
+/** The "Document" button in the top bar. */
 function showDocumentMenu() {
   const tab = state.selected;
   if (!tab) return;
@@ -926,30 +932,30 @@ function showDocumentMenu() {
   const enabled = tab.canEdit;
   const rect = el.documentButton.getBoundingClientRect();
   popup([
-    { id: "save", label: "Ruaj", accelerator: "Ctrl+S", enabled: enabled && tab.isDirty },
-    { id: "saveAs", label: "Ruaj si…", accelerator: "Ctrl+Shift+S", enabled },
-    { id: "undo", label: "Zhbëj", accelerator: "Ctrl+Z", enabled: enabled && tab.history.length > 0 },
+    { id: "save", label: "Save", accelerator: "Ctrl+S", enabled: enabled && tab.isDirty },
+    { id: "saveAs", label: "Save As…", accelerator: "Ctrl+Shift+S", enabled },
+    { id: "undo", label: "Undo", accelerator: "Ctrl+Z", enabled: enabled && tab.history.length > 0 },
     { type: "separator" },
-    { id: "blank", label: `Shto faqe bosh pas faqes ${n}`, enabled },
-    { id: "insert", label: `Shto faqe nga PDF pas faqes ${n}…`, enabled },
-    { id: "merge", label: "Bashko PDF në fund…", enabled },
-    { id: "delete", label: `Fshi faqen ${n}`, accelerator: "Delete", enabled: enabled && tab.pageCount > 1 },
+    { id: "blank", label: `Insert Blank Page After Page ${n}`, enabled },
+    { id: "insert", label: `Insert Pages from PDF After Page ${n}…`, enabled },
+    { id: "merge", label: "Merge PDFs at End…", enabled },
+    { id: "delete", label: `Delete Page ${n}`, accelerator: "Delete", enabled: enabled && tab.pageCount > 1 },
     { type: "separator" },
-    { id: "rotateLeft", label: `Rrotullo faqen ${n} majtas`, enabled },
-    { id: "rotateRight", label: `Rrotullo faqen ${n} djathtas`, enabled },
+    { id: "rotateLeft", label: `Rotate Page ${n} Left`, enabled },
+    { id: "rotateRight", label: `Rotate Page ${n} Right`, enabled },
     { type: "separator" },
-    { id: "extract", label: "Nxirr faqet në PDF të ri…", enabled },
-    { id: "split", label: "Ndaj në faqe të veçanta…", enabled },
+    { id: "extract", label: "Extract Pages to New PDF…", enabled },
+    { id: "split", label: "Split into Single Pages…", enabled },
     { type: "separator" },
-    { id: "word", label: "Eksporto në Word…", enabled },
-    { id: "jpg", label: "Eksporto si JPG…", accelerator: "Ctrl+E", enabled },
+    { id: "word", label: "Export to Word…", enabled },
+    { id: "jpg", label: "Export as JPG…", accelerator: "Ctrl+E", enabled },
   ], rect.left, rect.bottom + 4, {
     save: () => tab.save(),
     saveAs: () => tab.saveAs(),
     undo: () => tab.undo(),
     blank: () => tab.insertBlankPage(n),
-    insert: () => tab.insertPDFs(n, "Zgjidh PDF-të që do të shtohen"),
-    merge: () => tab.insertPDFs(tab.pageCount, "Zgjidh PDF-të që do të bashkohen"),
+    insert: () => tab.insertPDFs(n, "Choose the PDFs to insert"),
+    merge: () => tab.insertPDFs(tab.pageCount, "Choose the PDFs to merge"),
     delete: () => tab.deletePage(n),
     rotateLeft: () => tab.rotatePage(n, -90),
     rotateRight: () => tab.rotatePage(n, 90),
@@ -964,21 +970,37 @@ function showDocumentMenu() {
 function showPageMenu(tab, n, x, y) {
   const enabled = tab.canEdit;
   popup([
-    { id: "rotateLeft", label: "Rrotullo majtas", enabled },
-    { id: "rotateRight", label: "Rrotullo djathtas", enabled },
+    { id: "rotateLeft", label: "Rotate Left", enabled },
+    { id: "rotateRight", label: "Rotate Right", enabled },
     { type: "separator" },
-    { id: "blank", label: "Shto faqe bosh pas kësaj", enabled },
-    { id: "insert", label: "Shto faqe nga PDF pas kësaj…", enabled },
-    { id: "extract", label: "Ruaj këtë faqe si PDF…", enabled },
+    { id: "blank", label: "Insert Blank Page After This", enabled },
+    { id: "insert", label: "Insert Pages from PDF After This…", enabled },
+    { id: "extract", label: "Save This Page as PDF…", enabled },
     { type: "separator" },
-    { id: "delete", label: "Fshi faqen", accelerator: "Delete", enabled: enabled && tab.pageCount > 1 },
+    { id: "delete", label: "Delete Page", accelerator: "Delete", enabled: enabled && tab.pageCount > 1 },
   ], x, y, {
     rotateLeft: () => tab.rotatePage(n, -90),
     rotateRight: () => tab.rotatePage(n, 90),
     blank: () => tab.insertBlankPage(n),
-    insert: () => tab.insertPDFs(n, "Zgjidh PDF-të që do të shtohen"),
+    insert: () => tab.insertPDFs(n, "Choose the PDFs to insert"),
     extract: () => tab.extractPagesPrompt(`${n}`),
     delete: () => tab.deletePage(n),
+  });
+}
+
+/** The "Updates" button; on macOS the same items are in the app menu. */
+function showUpdatesMenu() {
+  const rect = el.updatesButton.getBoundingClientRect();
+  const updates = state.updates;
+  popup([
+    { id: "check", label: updates.checkingForUpdates ? "Checking for Updates…" : "Check for Updates…", enabled: !updates.checkingForUpdates },
+    { type: "separator" },
+    { id: "auto", label: "Check for Updates Automatically", type: "checkbox", checked: updates.checkForUpdates },
+    { id: "install", label: "Install Updates Automatically", type: "checkbox", checked: updates.installUpdatesAutomatically, enabled: updates.checkForUpdates },
+  ], rect.left, rect.bottom + 4, {
+    check: actions.checkForUpdates,
+    auto: actions.toggleCheckForUpdates,
+    install: actions.toggleInstallUpdates,
   });
 }
 
@@ -1023,14 +1045,17 @@ const actions = {
   },
   // Also in the document menu of the top bar, for the current page
   insertBlankPage: withTab((tab) => tab.insertBlankPage(tab.currentPage)),
-  insertPDFs: withTab((tab) => tab.insertPDFs(tab.currentPage, "Zgjidh PDF-të që do të shtohen")),
-  mergePDFs: withTab((tab) => tab.insertPDFs(tab.pageCount, "Zgjidh PDF-të që do të bashkohen")),
+  insertPDFs: withTab((tab) => tab.insertPDFs(tab.currentPage, "Choose the PDFs to insert")),
+  mergePDFs: withTab((tab) => tab.insertPDFs(tab.pageCount, "Choose the PDFs to merge")),
   deletePage: withTab((tab) => tab.deletePage(tab.currentPage)),
   rotatePageLeft: withTab((tab) => tab.rotatePage(tab.currentPage, -90)),
   rotatePageRight: withTab((tab) => tab.rotatePage(tab.currentPage, 90)),
   extractPages: withTab((tab) => tab.extractPagesPrompt()),
   splitPages: withTab((tab) => tab.splitPages()),
   exportWord: withTab((tab) => tab.exportWord()),
+  checkForUpdates: () => window.host.checkForUpdates(),
+  toggleCheckForUpdates: () => window.host.setUpdateSetting("checkForUpdates", !state.updates.checkForUpdates),
+  toggleInstallUpdates: () => window.host.setUpdateSetting("installUpdatesAutomatically", !state.updates.installUpdatesAutomatically),
 };
 
 el.openButton.addEventListener("click", actions.open);
@@ -1046,6 +1071,7 @@ el.actualSize.addEventListener("click", actions.actualSize);
 el.exportJPG.addEventListener("click", actions.exportJPG);
 el.documentButton.addEventListener("click", showDocumentMenu);
 el.fullscreen.addEventListener("click", actions.fullScreen);
+el.updatesButton.addEventListener("click", showUpdatesMenu);
 el.layoutButton.addEventListener("click", () => toggleMenu(el.layoutMenu));
 el.overflowButton.addEventListener("click", () => toggleMenu(el.overflowMenu));
 
@@ -1168,9 +1194,16 @@ document.addEventListener("drop", (event) => {
 // MARK: - Window
 
 window.host.onOpenFiles(openFiles);
+window.host.onUpdateState((updates) => {
+  state.updates = updates;
+});
+window.host.onUpdateProgress((fraction) => {
+  el.updateProgress.hidden = fraction === null;
+  el.updateBar.value = fraction ?? 0;
+});
 window.host.onFullScreen((value) => {
   document.body.classList.toggle("fullscreen", value);
-  el.fullscreen.title = value ? "Dil nga ekrani i plotë (F11)" : "Ekran i plotë (F11)";
+  el.fullscreen.title = value ? "Exit Full Screen (F11)" : "Full Screen (F11)";
 });
 document.body.classList.add(window.host.platform);
 new ResizeObserver(renderTabs).observe(el.tabstrip);

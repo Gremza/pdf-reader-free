@@ -1,11 +1,11 @@
 ---
 name: add-feature
-description: Add or change a feature in PDF Reader Free so the native macOS app and the Windows (Electron) app stay equal — where each piece goes, Albanian wording, menus, shortcuts, tests. Use for any new command, edit, export or UI control.
+description: Add or change a feature in PDF Reader Free so the native macOS app and the Windows (Electron) app stay equal — where each piece goes, English wording, menus, shortcuts, tests. Use for any new command, edit, export or UI control.
 ---
 
 # Adding a feature to both apps
 
-Read `CLAUDE.md` first. A feature is done only when it exists in **both** apps with the **same Albanian text**.
+Read `CLAUDE.md` first. A feature is done only when it exists in **both** apps with the **same English text**.
 
 ## macOS (`Sources/PDFReader/`)
 1. Logic in `PDFViewModel.swift`. Page edits go through `applyEdit(pageAfter:) { doc in … }` so undo, dirty state, thumbnails and search refresh for free; throw `EditError` for user-facing failures. Long work reads a copy via `exportSource()` off the main thread and reports `exportProgress`.
@@ -22,4 +22,4 @@ Read `CLAUDE.md` first. A feature is done only when it exists in **both** apps w
 ## Then
 - Update the README feature list and shortcut table.
 - Test the macOS side with the `test-native` skill; run `npm start` in `windows/` and exercise the feature.
-- Optionally run the `parity-checker` and `albanian-ui-reviewer` agents.
+- Optionally run the `parity-checker` and `ui-text-reviewer` agents.

@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { buildDocx } = require("./docx");
+const updater = require("./updater");
 
 const ROOT = path.join(__dirname, "..");
 const BAR_HEIGHT = 40;
@@ -47,6 +48,7 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === "darwin") updateAppMenu();
     else Menu.setApplicationMenu(null);
     createWindow();
+    updater.startUpdater(() => win, updateChanged);
   });
 
   app.on("window-all-closed", () => app.quit());
@@ -105,13 +107,16 @@ function createWindow() {
     if (dirtyCount === 0) return;
     const choice = dialog.showMessageBoxSync(win, {
       type: "warning",
-      message: dirtyCount === 1 ? "Një dokument ka ndryshime të paruajtura" : `${dirtyCount} dokumente kanë ndryshime të paruajtura`,
-      detail: "Nëse mbyll tani, ndryshimet humbasin.",
-      buttons: ["Mbyll pa ruajtur", "Anulo"],
+      message: dirtyCount === 1 ? "One document has unsaved changes" : `${dirtyCount} documents have unsaved changes`,
+      detail: "Your changes will be lost if you close now.",
+      buttons: ["Close Without Saving", "Cancel"],
       defaultId: 1,
       cancelId: 1,
     });
-    if (choice !== 0) event.preventDefault();
+    if (choice !== 0) {
+      event.preventDefault();
+      updater.quitCancelled();
+    }
   });
   win.on("closed", () => {
     win = null;
@@ -149,13 +154,14 @@ async function openPaths(paths) {
 function showOpenError(names) {
   dialog.showMessageBox(win, {
     type: "warning",
-    message: "Skedari nuk mund të hapet",
+    message: "The file can't be opened",
     detail: names.join("\n"),
   });
 }
 
 ipcMain.on("ready", () => {
   rendererReady = true;
+  win.webContents.send("update-state", updater.updateState());
   const paths = pending;
   pending = [];
   openPaths(paths);
@@ -177,7 +183,7 @@ const exportFolders = new Set();
 ipcMain.handle("choose-export-folder", async (_event, pdfName, title) => {
   const result = await dialog.showOpenDialog(win, {
     title,
-    buttonLabel: "Eksporto",
+    buttonLabel: "Export",
     properties: ["openDirectory", "createDirectory"],
   });
   if (result.canceled) return null;
@@ -205,7 +211,7 @@ ipcMain.handle("write-export-file", async (_event, folder, fileName, data) => {
 ipcMain.on("export-finished", (_event, folder, error) => {
   if (!exportFolders.delete(folder)) return;
   if (error) {
-    dialog.showMessageBox(win, { type: "warning", message: "Eksportimi dështoi", detail: error });
+    dialog.showMessageBox(win, { type: "warning", message: "Export failed", detail: error });
   } else {
     shell.openPath(folder);
   }
@@ -226,7 +232,7 @@ async function writeFileSafely(file, data) {
 }
 
 function saveFilters(kind) {
-  return kind === "docx" ? [{ name: "Dokument Word", extensions: ["docx"] }] : [{ name: "PDF", extensions: ["pdf"] }];
+  return kind === "docx" ? [{ name: "Word Document", extensions: ["docx"] }] : [{ name: "PDF", extensions: ["pdf"] }];
 }
 
 async function askSavePath(defaultName, kind, title) {
@@ -250,7 +256,7 @@ ipcMain.handle("save-as", async (_event, defaultName, data, title) => {
 });
 
 ipcMain.handle("export-docx", async (_event, defaultName, document) => {
-  const file = await askSavePath(defaultName, "docx", "Eksporto në Word");
+  const file = await askSavePath(defaultName, "docx", "Export to Word");
   if (!file) return null;
   await writeFileSafely(file, buildDocx(document));
   shell.openPath(file);
@@ -272,9 +278,9 @@ ipcMain.handle("pick-pdfs", async (_event, title) => {
 ipcMain.handle("confirm-close-tab", async (_event, name) => {
   const { response } = await dialog.showMessageBox(win, {
     type: "warning",
-    message: `Të ruhen ndryshimet në "${name}"?`,
-    detail: "Nëse nuk i ruan, ndryshimet humbasin.",
-    buttons: ["Ruaj", "Mos ruaj", "Anulo"],
+    message: `Save changes to "${name}"?`,
+    detail: "Your changes will be lost if you don't save them.",
+    buttons: ["Save", "Don't Save", "Cancel"],
     defaultId: 0,
     cancelId: 2,
   });
@@ -295,6 +301,8 @@ ipcMain.handle("popup-menu", (_event, items, x, y) => new Promise((resolve) => {
     ? { type: "separator" }
     : {
         label: item.label,
+        type: item.type,
+        checked: item.checked,
         enabled: item.enabled !== false,
         accelerator: item.accelerator,
         registerAccelerator: false,
@@ -312,10 +320,10 @@ ipcMain.handle("popup-menu", (_event, items, x, y) => new Promise((resolve) => {
 // MARK: macOS menu bar
 
 const LAYOUTS = [
-  ["single", "Një faqe"],
-  ["continuous", "E vazhduar"],
-  ["twoUp", "Dy faqe"],
-  ["twoUpContinuous", "Dy faqe, e vazhduar"],
+  ["single", "Single Page"],
+  ["continuous", "Continuous"],
+  ["twoUp", "Two Pages"],
+  ["twoUpContinuous", "Two Pages, Continuous"],
 ];
 
 // What the selected tab allows right now, reported by the renderer
@@ -330,75 +338,100 @@ function updateAppMenu() {
   const run = (action) => () => win?.webContents.send("menu-action", action);
   const item = (label, action, options = {}) => ({ label, click: run(action), ...options });
   const separator = { type: "separator" };
+  // Edits of the current page, in both the File and the Pages menu
+  const pageEditItems = [
+    item(`Insert Blank Page After Page ${page}`, "insertBlankPage", { enabled: edit }),
+    item(`Insert Pages from PDF After Page ${page}…`, "insertPDFs", { enabled: edit }),
+    item("Merge PDFs at End…", "mergePDFs", { enabled: edit }),
+    separator,
+    item(`Rotate Page ${page} Left`, "rotatePageLeft", { enabled: edit }),
+    item(`Rotate Page ${page} Right`, "rotatePageRight", { enabled: edit }),
+    separator,
+    item(`Delete Page ${page}`, "deletePage", { enabled: edit && s.pageCount > 1 }),
+  ];
 
+  const updates = updater.updateState();
   const template = [
-    { role: "appMenu" },
+    {
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        item(updates.checkingForUpdates ? "Checking for Updates…" : "Check for Updates…", "checkForUpdates", { enabled: !updates.checkingForUpdates }),
+        item("Check for Updates Automatically", "toggleCheckForUpdates", { type: "checkbox", checked: updates.checkForUpdates }),
+        item("Install Updates Automatically", "toggleInstallUpdates", {
+          type: "checkbox", checked: updates.installUpdatesAutomatically, enabled: updates.checkForUpdates,
+        }),
+        separator,
+        { role: "services" },
+        separator,
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        separator,
+        { role: "quit" },
+      ],
+    },
     {
       label: "File",
       submenu: [
-        item("Hap…", "open", { accelerator: "CmdOrCtrl+O" }),
+        item("Open…", "open", { accelerator: "CmdOrCtrl+O" }),
         { role: "recentDocuments", submenu: [{ role: "clearRecentDocuments" }] },
-        item("Mbyll tab-in", "closeTab", { accelerator: "CmdOrCtrl+W" }),
+        item("Close Tab", "closeTab", { accelerator: "CmdOrCtrl+W" }),
         separator,
-        item("Ruaj", "save", { accelerator: "CmdOrCtrl+S", enabled: edit && s.isDirty }),
-        item("Ruaj si…", "saveAs", { accelerator: "CmdOrCtrl+Shift+S", enabled: edit }),
+        item("Save", "save", { accelerator: "CmdOrCtrl+S", enabled: edit && s.isDirty }),
+        item("Save As…", "saveAs", { accelerator: "CmdOrCtrl+Shift+S", enabled: edit }),
+        // CmdOrCtrl+Z stays on Edit > Undo
+        item("Undo", "undo", { enabled: edit && s.canUndo }),
         separator,
-        item("Nxirr faqet në PDF të ri…", "extractPages", { enabled: edit }),
-        item("Ndaj në faqe të veçanta…", "splitPages", { enabled: edit }),
+        ...pageEditItems,
         separator,
-        item("Eksporto në Word…", "exportWord", { enabled: edit }),
-        item("Eksporto si JPG…", "exportJPG", { accelerator: "CmdOrCtrl+E", enabled: edit }),
+        item("Extract Pages to New PDF…", "extractPages", { enabled: edit }),
+        item("Split into Single Pages…", "splitPages", { enabled: edit }),
+        separator,
+        item("Export to Word…", "exportWord", { enabled: edit }),
+        item("Export as JPG…", "exportJPG", { accelerator: "CmdOrCtrl+E", enabled: edit }),
       ],
     },
     {
       label: "Edit",
       submenu: [
-        item("Zhbëj", "undo", { accelerator: "CmdOrCtrl+Z" }),
+        item("Undo", "undo", { accelerator: "CmdOrCtrl+Z" }),
         separator,
         { role: "cut" },
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" },
         separator,
-        item("Kërko", "focusSearch", { accelerator: "CmdOrCtrl+F", enabled: doc }),
+        item("Search", "focusSearch", { accelerator: "CmdOrCtrl+F", enabled: doc }),
       ],
     },
     {
       label: "View",
       submenu: [
-        item("Miniaturat", "toggleThumbnails", { type: "checkbox", checked: !!s.showThumbnails, accelerator: "Ctrl+Cmd+S", enabled: doc }),
+        item("Thumbnails", "toggleThumbnails", { type: "checkbox", checked: !!s.showThumbnails, accelerator: "Ctrl+Cmd+S", enabled: doc }),
         separator,
-        item("Zmadho", "zoomIn", { accelerator: "CmdOrCtrl+Plus", enabled: doc }),
-        item("Zvogëlo", "zoomOut", { accelerator: "CmdOrCtrl+-", enabled: doc }),
-        item("Madhësia reale", "actualSize", { accelerator: "CmdOrCtrl+0", enabled: doc }),
+        item("Zoom In", "zoomIn", { accelerator: "CmdOrCtrl+Plus", enabled: doc }),
+        item("Zoom Out", "zoomOut", { accelerator: "CmdOrCtrl+-", enabled: doc }),
+        item("Actual Size", "actualSize", { accelerator: "CmdOrCtrl+0", enabled: doc }),
         separator,
-        item("Gjerësia e plotë", "fitWidth", { type: "checkbox", checked: s.fitMode === "width", accelerator: "CmdOrCtrl+1", enabled: doc }),
-        item("Faqja e plotë", "fitPage", { type: "checkbox", checked: s.fitMode === "page", accelerator: "CmdOrCtrl+2", enabled: doc }),
+        item("Fit Width", "fitWidth", { type: "checkbox", checked: s.fitMode === "width", accelerator: "CmdOrCtrl+1", enabled: doc }),
+        item("Fit Page", "fitPage", { type: "checkbox", checked: s.fitMode === "page", accelerator: "CmdOrCtrl+2", enabled: doc }),
         separator,
         ...LAYOUTS.map(([layout, label]) =>
           item(label, `layout:${layout}`, { type: "radio", checked: s.layout === layout, enabled: doc })),
         separator,
-        item("Rrotullo majtas", "rotateLeft", { accelerator: "CmdOrCtrl+L", enabled: doc }),
-        item("Rrotullo djathtas", "rotateRight", { accelerator: "CmdOrCtrl+R", enabled: doc }),
+        item("Rotate Left", "rotateLeft", { accelerator: "CmdOrCtrl+L", enabled: doc }),
+        item("Rotate Right", "rotateRight", { accelerator: "CmdOrCtrl+R", enabled: doc }),
         separator,
-        item("Faqja e mëparshme", "previousPage", { accelerator: "CmdOrCtrl+Up", enabled: doc && page > 1 }),
-        item("Faqja tjetër", "nextPage", { accelerator: "CmdOrCtrl+Down", enabled: doc && page < s.pageCount }),
+        item("Previous Page", "previousPage", { accelerator: "CmdOrCtrl+Up", enabled: doc && page > 1 }),
+        item("Next Page", "nextPage", { accelerator: "CmdOrCtrl+Down", enabled: doc && page < s.pageCount }),
         separator,
         { role: "togglefullscreen" },
       ],
     },
     {
-      label: "Faqet",
-      submenu: [
-        item(`Shto faqe bosh pas faqes ${page}`, "insertBlankPage", { enabled: edit }),
-        item(`Shto faqe nga PDF pas faqes ${page}…`, "insertPDFs", { enabled: edit }),
-        item("Bashko PDF në fund…", "mergePDFs", { enabled: edit }),
-        separator,
-        item(`Rrotullo faqen ${page} majtas`, "rotatePageLeft", { enabled: edit }),
-        item(`Rrotullo faqen ${page} djathtas`, "rotatePageRight", { enabled: edit }),
-        separator,
-        item(`Fshi faqen ${page}`, "deletePage", { enabled: edit && s.pageCount > 1 }),
-      ],
+      label: "Pages",
+      submenu: pageEditItems,
     },
     {
       role: "windowMenu",
@@ -406,8 +439,8 @@ function updateAppMenu() {
         { role: "minimize" },
         { role: "zoom" },
         separator,
-        item("Tab-i tjetër", "nextTab", { accelerator: "CmdOrCtrl+Shift+]", enabled: s.tabCount > 1 }),
-        item("Tab-i i mëparshëm", "previousTab", { accelerator: "CmdOrCtrl+Shift+[", enabled: s.tabCount > 1 }),
+        item("Next Tab", "nextTab", { accelerator: "CmdOrCtrl+Shift+]", enabled: s.tabCount > 1 }),
+        item("Previous Tab", "previousTab", { accelerator: "CmdOrCtrl+Shift+[", enabled: s.tabCount > 1 }),
         separator,
         { role: "front" },
       ],
@@ -420,6 +453,17 @@ ipcMain.on("menu-state", (_event, state) => {
   menuState = state;
   if (process.platform === "darwin") updateAppMenu();
 });
+
+// MARK: Updates
+
+/** Refreshes the macOS menu and the renderer's update button after a setting or the check state changed. */
+function updateChanged() {
+  if (process.platform === "darwin") updateAppMenu();
+  win?.webContents.send("update-state", updater.updateState());
+}
+
+ipcMain.on("check-for-updates", () => updater.checkForUpdates());
+ipcMain.on("set-update-setting", (_event, key, value) => updater.setUpdateSetting(key, value));
 
 ipcMain.on("open-paths", (_event, paths) => openPaths(paths));
 ipcMain.on("open-failed", (_event, names) => showOpenError(names));

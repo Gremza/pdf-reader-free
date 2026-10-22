@@ -429,6 +429,8 @@ body.fullscreen #fullscreen .exit { display: block; }
 }
 
 .export-progress[hidden] { display: none; }
+.update-progress { bottom: 70px; }
+#updates-button { margin-left: auto; }
 .export-progress progress { width: 120px; accent-color: var(--accent); }
 
 /* MARK: Empty state */

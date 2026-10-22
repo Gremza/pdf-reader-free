@@ -6,7 +6,7 @@ enum FitMode {
     case width, page, custom
 }
 
-/// A running export, e.g. ("Duke eksportuar", 3, 10).
+/// A running export, e.g. ("Exporting", 3, 10).
 struct ExportProgress {
     var label: String
     var done: Int
@@ -26,8 +26,8 @@ struct EditError: LocalizedError {
     var errorDescription: String? { detail }
 
     static let protected = EditError(
-        title: "Ky PDF është i mbrojtur",
-        detail: "PDF-të e mbrojtura me fjalëkalim ose me kufizime nuk mund të ndryshohen.")
+        title: "This PDF is protected",
+        detail: "PDFs protected by a password or restrictions can't be edited.")
 }
 
 enum PageLayout: String, CaseIterable, Identifiable {
@@ -36,10 +36,10 @@ enum PageLayout: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .single: "Një faqe"
-        case .continuous: "E vazhduar"
-        case .twoUp: "Dy faqe"
-        case .twoUpContinuous: "Dy faqe, e vazhduar"
+        case .single: "Single Page"
+        case .continuous: "Continuous"
+        case .twoUp: "Two Pages"
+        case .twoUpContinuous: "Two Pages, Continuous"
         }
     }
 
@@ -68,7 +68,7 @@ final class PDFViewModel: ObservableObject {
     static let undoLimit = 30
 
     let pdfView = PDFView()
-    /// Where the PDF is saved; changes with "Ruaj si".
+    /// Where the PDF is saved; changes with "Save As".
     @Published private(set) var url: URL
 
     @Published var currentPage = 1
@@ -213,7 +213,7 @@ final class PDFViewModel: ObservableObject {
 
     /// Saves every page as 1.jpg, 2.jpg, … in a new folder named after the PDF.
     func exportJPEG() {
-        exportToFolder(message: "Zgjidh ku të krijohet dosja me imazhet JPG", label: "Duke eksportuar") { page, number in
+        exportToFolder(message: "Choose where to create the folder of JPG images", label: "Exporting") { page, number in
             ("\(number).jpg", try Self.jpegData(for: page))
         }
     }
@@ -221,7 +221,7 @@ final class PDFViewModel: ObservableObject {
     /// Saves every page as 1.pdf, 2.pdf, … in a new folder named after the PDF.
     func splitPages() {
         guard ensureEditable() else { return }
-        exportToFolder(message: "Zgjidh ku të krijohet dosja me faqet PDF", label: "Duke ndarë") { page, number in
+        exportToFolder(message: "Choose where to create the folder of PDF pages", label: "Splitting") { page, number in
             let single = PDFDocument()
             guard let copy = page.copy() as? PDFPage else { throw CocoaError(.fileWriteUnknown) }
             single.insert(copy, at: 0)
@@ -241,7 +241,7 @@ final class PDFViewModel: ObservableObject {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
-        panel.prompt = "Eksporto"
+        panel.prompt = "Export"
         panel.message = message
         guard panel.runModal() == .OK, let parent = panel.url else { return }
 
@@ -366,7 +366,7 @@ final class PDFViewModel: ObservableObject {
     }
 
     private func showExportError(_ error: Error) {
-        showError("Eksportimi dështoi", error.localizedDescription)
+        showError("Export failed", error.localizedDescription)
     }
 
     func showError(_ title: String, _ detail: String) {
@@ -393,7 +393,7 @@ final class PDFViewModel: ObservableObject {
     private func applyEdit(pageAfter: Int? = nil, _ change: (PDFDocument) throws -> Void) {
         guard canEdit, ensureEditable(), let doc = pdfView.document else { return }
         guard let before = doc.dataRepresentation() else {
-            showError("Ndryshimi dështoi", "PDF-ja nuk mund të lexohet.")
+            showError("Edit failed", "The PDF can't be read.")
             return
         }
         do {
@@ -402,7 +402,7 @@ final class PDFViewModel: ObservableObject {
             showError(error.title, error.detail)
             return
         } catch {
-            showError("Ndryshimi dështoi", error.localizedDescription)
+            showError("Edit failed", error.localizedDescription)
             return
         }
         history.append(Snapshot(data: before, version: version))
@@ -437,7 +437,7 @@ final class PDFViewModel: ObservableObject {
 
     func deletePage(_ number: Int) {
         guard pageCount > 1 else {
-            showError("Faqja nuk mund të fshihet", "PDF-ja duhet të ketë të paktën një faqe.")
+            showError("The page can't be deleted", "A PDF must have at least one page.")
             return
         }
         applyEdit(pageAfter: number) { $0.removePage(at: number - 1) }
@@ -485,7 +485,7 @@ final class PDFViewModel: ObservableObject {
             var sources: [PDFDocument] = []
             for url in panel.urls {
                 guard let source = PDFDocument(url: url) else {
-                    throw EditError(title: "Skedari nuk mund të hapet", detail: url.lastPathComponent)
+                    throw EditError(title: "The file can't be opened", detail: url.lastPathComponent)
                 }
                 if source.isLocked { throw EditError.protected }
                 sources.append(source)
@@ -502,7 +502,7 @@ final class PDFViewModel: ObservableObject {
     }
 
     func mergePDFs() {
-        insertPDFs(after: pageCount, message: "Zgjidh PDF-të që do të bashkohen")
+        insertPDFs(after: pageCount, message: "Choose the PDFs to merge")
     }
 
     /// Asks which pages to keep and saves them as a new PDF.
@@ -510,10 +510,10 @@ final class PDFViewModel: ObservableObject {
         guard canEdit, ensureEditable(), let doc = pdfView.document else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Nxirr faqet"
-        alert.informativeText = "Shkruaj faqet që do të ruhen në një PDF të ri, p.sh. 1-3, 5 (gjithsej \(pageCount) faqe)."
-        alert.addButton(withTitle: "Nxirr")
-        alert.addButton(withTitle: "Anulo")
+        alert.messageText = "Extract Pages"
+        alert.informativeText = "Enter the pages to save in a new PDF, e.g. 1-3, 5 (\(pageCount) pages in total)."
+        alert.addButton(withTitle: "Extract")
+        alert.addButton(withTitle: "Cancel")
         let field = NSTextField(string: defaultValue ?? "\(currentPage)")
         field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
         alert.accessoryView = field
@@ -522,7 +522,7 @@ final class PDFViewModel: ObservableObject {
 
         let text = field.stringValue
         guard let indexes = Self.parsePageRanges(text, pageCount: pageCount) else {
-            showError("Faqet nuk janë të sakta", "Shkruaj numra nga 1 deri në \(pageCount), p.sh. 1-3, 5")
+            showError("Invalid pages", "Enter numbers from 1 to \(pageCount), e.g. 1-3, 5")
             return
         }
         let extracted = PDFDocument()
@@ -531,10 +531,10 @@ final class PDFViewModel: ObservableObject {
                 extracted.insert(page, at: extracted.pageCount)
             }
         }
-        let name = "\(baseName) (faqet \(text.filter { !$0.isWhitespace })).pdf"
-        guard let target = askSaveURL(name: name, type: .pdf, message: "Ruaj faqet e nxjerra") else { return }
+        let name = "\(baseName) (pages \(text.filter { !$0.isWhitespace })).pdf"
+        guard let target = askSaveURL(name: name, type: .pdf, message: "Save Extracted Pages") else { return }
         guard let data = extracted.dataRepresentation() else {
-            showError("PDF-ja nuk mund të ruhet", "Faqet nuk mund të shkruhen.")
+            showError("The PDF can't be saved", "The pages can't be written.")
             return
         }
         write(data, to: target)
@@ -571,7 +571,7 @@ final class PDFViewModel: ObservableObject {
     @discardableResult
     func saveAs() -> Bool {
         guard let data = pdfView.document?.dataRepresentation(),
-              let target = askSaveURL(name: url.lastPathComponent, type: .pdf, message: "Ruaj si"),
+              let target = askSaveURL(name: url.lastPathComponent, type: .pdf, message: "Save As"),
               write(data, to: target)
         else { return false }
         url = target
@@ -598,7 +598,7 @@ final class PDFViewModel: ObservableObject {
             try data.write(to: target, options: .atomic)
             return true
         } catch {
-            showError("Skedari nuk mund të ruhet", error.localizedDescription)
+            showError("The file can't be saved", error.localizedDescription)
             return false
         }
     }
@@ -608,7 +608,7 @@ final class PDFViewModel: ObservableObject {
     /// Saves the text of the PDF as a Word document.
     func exportWord() {
         guard canEdit, let source = exportSource() else { return }
-        exportProgress = ExportProgress(label: "Duke përgatitur Word", done: 0, total: pageCount)
+        exportProgress = ExportProgress(label: "Preparing Word", done: 0, total: pageCount)
 
         Task { [weak self] in
             let document = await WordExport.extract(from: source) { done in
@@ -617,15 +617,15 @@ final class PDFViewModel: ObservableObject {
             guard let self else { return }
             exportProgress = nil
             guard let document else {
-                showError("Eksportimi në Word dështoi", "PDF-ja nuk mund të lexohet.")
+                showError("Word export failed", "The PDF can't be read.")
                 return
             }
             guard document.hasText else {
-                showError("Ky PDF nuk ka tekst",
-                          "Faqet janë ndoshta imazhe të skanuara, prandaj nuk ka tekst për ta kaluar në Word.")
+                showError("This PDF has no text",
+                          "The pages are probably scanned images, so there is no text to export to Word.")
                 return
             }
-            guard let target = askSaveURL(name: "\(baseName).docx", type: WordExport.docxType, message: "Eksporto në Word"),
+            guard let target = askSaveURL(name: "\(baseName).docx", type: WordExport.docxType, message: "Export to Word"),
                   write(WordExport.docx(document), to: target)
             else { return }
             NSWorkspace.shared.open(target)

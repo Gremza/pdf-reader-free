@@ -68,22 +68,22 @@ struct ThumbnailSidebar: View {
             drop(items, at: number)
         } isTargeted: { dropTarget = $0 ? number : (dropTarget == number ? nil : dropTarget) }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Faqja \(number)")
+        .accessibilityLabel("Page \(number)")
         .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
     }
 
     @ViewBuilder
     private func pageMenu(_ number: Int) -> some View {
-        Button("Rrotullo majtas") { model.rotatePage(number, by: -90) }
-        Button("Rrotullo djathtas") { model.rotatePage(number, by: 90) }
+        Button("Rotate Left") { model.rotatePage(number, by: -90) }
+        Button("Rotate Right") { model.rotatePage(number, by: 90) }
         Divider()
-        Button("Shto faqe bosh pas kësaj") { model.insertBlankPage(after: number) }
-        Button("Shto faqe nga PDF pas kësaj…") {
-            model.insertPDFs(after: number, message: "Zgjidh PDF-të që do të shtohen")
+        Button("Insert Blank Page After This") { model.insertBlankPage(after: number) }
+        Button("Insert Pages from PDF After This…") {
+            model.insertPDFs(after: number, message: "Choose the PDFs to insert")
         }
-        Button("Ruaj këtë faqe si PDF…") { model.extractPagesPrompt(defaultValue: "\(number)") }
+        Button("Save This Page as PDF…") { model.extractPagesPrompt(defaultValue: "\(number)") }
         Divider()
-        Button("Fshi faqen") { model.deletePage(number) }
+        Button("Delete Page") { model.deletePage(number) }
             .disabled(model.pageCount <= 1)
     }
 

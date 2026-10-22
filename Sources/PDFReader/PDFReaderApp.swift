@@ -12,19 +12,22 @@ struct PDFReaderApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                UpdateMenuItems(updater: UpdateChecker.shared)
+            }
             CommandGroup(replacing: .newItem) {
-                Button("Hap…") { tabs.showOpenPanel() }
+                Button("Open…") { tabs.showOpenPanel() }
                     .keyboardShortcut("o")
             }
             CommandGroup(replacing: .saveItem) {
-                Button("Mbyll tab-in") { tabs.closeSelected() }
+                Button("Close Tab") { tabs.closeSelected() }
                     .keyboardShortcut("w")
             }
             DocumentCommands(tabs: tabs)
             CommandGroup(before: .windowArrangement) {
-                Button("Tab-i tjetër") { tabs.selectNext() }
+                Button("Next Tab") { tabs.selectNext() }
                     .keyboardShortcut("]", modifiers: [.command, .shift])
-                Button("Tab-i i mëparshëm") { tabs.selectPrevious() }
+                Button("Previous Tab") { tabs.selectPrevious() }
                     .keyboardShortcut("[", modifiers: [.command, .shift])
                 Divider()
             }
@@ -36,6 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Tabs are drawn by the app itself, not by AppKit
         NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { UpdateChecker.shared.start() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { UpdateChecker.shared.relaunchIfNeeded() }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

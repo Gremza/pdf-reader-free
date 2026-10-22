@@ -48,7 +48,7 @@ final class TabsModel: ObservableObject {
 
         if !failed.isEmpty {
             let alert = NSAlert()
-            alert.messageText = "Skedari nuk mund të hapet"
+            alert.messageText = "The file can't be opened"
             alert.informativeText = failed.joined(separator: "\n")
             alert.runModal()
         }
@@ -74,11 +74,11 @@ final class TabsModel: ObservableObject {
             selectedID = id
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Të ruhen ndryshimet në \"\(tab.title)\"?"
-            alert.informativeText = "Nëse nuk i ruan, ndryshimet humbasin."
-            alert.addButton(withTitle: "Ruaj")
-            alert.addButton(withTitle: "Mos ruaj")
-            alert.addButton(withTitle: "Anulo")
+            alert.messageText = "Save changes to \"\(tab.title)\"?"
+            alert.informativeText = "Your changes will be lost if you don't save them."
+            alert.addButton(withTitle: "Save")
+            alert.addButton(withTitle: "Don't Save")
+            alert.addButton(withTitle: "Cancel")
             switch alert.runModal() {
             case .alertFirstButtonReturn: guard tab.model.save() else { return }
             case .alertSecondButtonReturn: break
@@ -120,11 +120,11 @@ final class TabsModel: ObservableObject {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = count == 1
-            ? "Një dokument ka ndryshime të paruajtura"
-            : "\(count) dokumente kanë ndryshime të paruajtura"
-        alert.informativeText = "Nëse mbyll tani, ndryshimet humbasin."
-        alert.addButton(withTitle: "Anulo")
-        alert.addButton(withTitle: "Mbyll pa ruajtur")
+            ? "One document has unsaved changes"
+            : "\(count) documents have unsaved changes"
+        alert.informativeText = "Your changes will be lost if you close now."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Close Without Saving")
         discardConfirmed = alert.runModal() == .alertSecondButtonReturn
         return discardConfirmed
     }

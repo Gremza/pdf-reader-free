@@ -5,8 +5,7 @@
 <h1 align="center">PDF Reader Free</h1>
 
 <p align="center">
-  A simple, fast and free PDF viewer for macOS and Windows.<br>
-  Një lexues PDF i thjeshtë, i shpejtë dhe falas për macOS dhe Windows.
+  A simple, fast and free PDF viewer for macOS and Windows.
 </p>
 
 <p align="center">
@@ -30,9 +29,10 @@
 - **Extract pages** (e.g. `1-3, 5`) into a new PDF, or **split** every page into its own PDF
 - **Export to Word** (`.docx`) — the text of the PDF, with paragraphs, bold/italic and font sizes
 - **Export to JPG** — saves every page as an image (`1.jpg`, `2.jpg`, …) in a new folder named after the PDF
-- On macOS every action is also in the menu bar (File, Edit, View, Faqet)
+- **Updates** — checks GitHub for a new version at launch and once a day; installs it automatically or asks first (*Check for Updates…*, *Check for Updates Automatically*, *Install Updates Automatically* in the app menu on macOS and the **Updates** button on Windows)
+- On macOS every action is also in the menu bar (File, Edit, View, Pages)
 - Open via `⌘O`, drag & drop, the Dock icon, or Finder's *Open With*
-- No tracking, no accounts, no network access
+- No tracking, no accounts; the only network access is the update check (it can be turned off)
 
 The macOS app is native (SwiftUI + PDFKit); the Windows app is built with Electron and [pdf.js](https://mozilla.github.io/pdf.js/) and has the same features.
 
@@ -100,7 +100,7 @@ npm run dist:arm64   # same for Windows on ARM
 ```
 Sources/PDFReader/
   PDFReaderApp.swift   App entry, file opening, quit confirmation
-  MenuCommands.swift   File / Edit / View / Faqet menu bar items
+  MenuCommands.swift   File / Edit / View / Pages menu bar items
   TabsModel.swift      Open documents / tabs, unsaved-changes prompts
   TopBar.swift         Tab strip with overflow + toolbar controls
   ContentView.swift    Window layout, empty state, drag & drop
