@@ -5,11 +5,14 @@ struct ContentView: View {
     @EnvironmentObject private var tabs: TabsModel
     var body: some View {
         VStack(spacing: 0) {
-            TopBar()
-            Divider()
+            // Full Screen Mode shows nothing but the page
+            if !tabs.isPresenting {
+                TopBar()
+                Divider()
+            }
 
             if let tab = tabs.selected {
-                DocumentView(model: tab.model, showThumbnails: tabs.showThumbnails)
+                DocumentView(model: tab.model, showThumbnails: tabs.showThumbnails && !tabs.isPresenting)
                     .id(tab.id)
             } else {
                 EmptyState()
@@ -47,7 +50,7 @@ private struct ExportProgressBadge: View {
     @ObservedObject var model: PDFViewModel
 
     var body: some View {
-        if let progress = model.exportProgress {
+        if let progress = model.exportProgress, !model.isPresenting {
             HStack(spacing: 10) {
                 ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
                     .frame(width: 120)

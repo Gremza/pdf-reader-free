@@ -45,6 +45,42 @@ func makePDF(_ url: URL, pages: Int) {
     m.undo()
     check("zhbëj pas ruajtjes -> dirty", m.isDirty)
 
+    // Full Screen Mode: single fitted pages on black, then the layout and zoom come back
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+    window.contentView = m.pdfView
+    m.layout = .twoUpContinuous
+    m.fitWidth()
+    m.goToPage(2)
+    m.setPresenting(true)
+    let fitted = 600 / 842.0
+    check("full screen: single page, black, fitted", m.isPresenting && m.pdfView.displayMode == .singlePage
+          && m.pdfView.backgroundColor == .black && !m.pdfView.displaysPageBreaks && m.fitMode == .page
+          && abs(m.pdfView.scaleFactor - fitted) < 0.01 && m.currentPage == 2)
+    m.nextPage()
+    check("full screen: next page", m.currentPage == 3)
+    m.previousPage(); m.previousPage()
+    check("full screen: previous page", m.currentPage == 1)
+    m.lastPage()
+    check("full screen: last page", m.currentPage == m.pageCount)
+    m.firstPage()
+    check("full screen: first page", m.currentPage == 1)
+    m.insertBlankPage(after: 1); m.undo()
+    check("full screen: undo keeps single page", m.pdfView.displayMode == .singlePage)
+    m.goToPage(3)
+    m.setPresenting(false)
+    check("full screen off: layout, fit and page back", !m.isPresenting && m.pdfView.displayMode == .twoUpContinuous
+          && m.fitMode == .width && m.pdfView.displaysPageBreaks && m.currentPage == 3)
+    m.actualSize()
+    m.setPresenting(true); m.setPresenting(false)
+    check("full screen off: custom zoom back", m.fitMode == .custom && abs(m.pdfView.scaleFactor - 1) < 0.01)
+    window.contentView = nil
+
+    m.searchText = "Titulli"
+    m.search()
+    let firstHit = m.currentPage
+    m.nextResult(); m.previousResult()
+    check("find next / previous", m.currentPage == firstHit)
+
     check("ranges 1-3, 5", PDFViewModel.parsePageRanges("1-3, 5", pageCount: 5) == [0,1,2,4])
     check("ranges 4-", PDFViewModel.parsePageRanges("4-", pageCount: 5) == [3,4])
     check("ranges gabim", PDFViewModel.parsePageRanges("0", pageCount: 5) == nil && PDFViewModel.parsePageRanges("2-9", pageCount: 5) == nil && PDFViewModel.parsePageRanges("abc", pageCount: 5) == nil)

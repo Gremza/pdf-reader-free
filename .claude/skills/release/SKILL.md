@@ -1,6 +1,6 @@
 ---
 name: release
-description: Publish a new PDF Reader Free release on GitHub (Gremza/pdf-reader-free) — bump versions, build the native macOS zip and the Windows installers, commit, push, and create the release with a feature list. Use when the owner asks to publish / release / "publikoje".
+description: Publish a new PDF Gremza release on GitHub (Gremza/pdf-reader-free) — bump versions, build the native macOS zip and the Windows installers, commit, push, and create the release with a feature list. Use when the owner asks to publish / release / "publikoje".
 ---
 
 # Releasing
@@ -13,11 +13,11 @@ Publishing is outward-facing: only do it when the owner asked for it.
    - `plutil -replace CFBundleVersion -string <n+1> Resources/Info.plist`
    - `"version": "X.Y.0"` in `windows/package.json`
 3. **macOS**: `./build.sh` (also installs to /Applications), then
-   `rm -f build/PDF-Reader.zip && ditto -c -k --keepParent "build/PDF Reader.app" build/PDF-Reader.zip`
+   `rm -f build/PDF-Reader.zip && ditto -c -k --keepParent "build/PDF Gremza.app" build/PDF-Reader.zip`
 4. **Windows**: `cd windows && rm -rf dist/*.exe dist/*.blockmap && npm run dist`
    → `dist/PDF-Reader-Setup-X.Y.0-x64.exe`, `dist/PDF-Reader-Portable-X.Y.0-x64.exe`
 5. **Commit & push** to `main` (do not add `.vscode/`), with the attribution trailer from the session instructions.
-6. **Release**: `gh release create vX.Y --title "PDF Reader Free X.Y" --notes-file notes.md build/PDF-Reader.zip windows/dist/PDF-Reader-Setup-*.exe windows/dist/PDF-Reader-Portable-*.exe`
+6. **Release**: `gh release create vX.Y --title "PDF Gremza X.Y" --notes-file notes.md build/PDF-Reader.zip windows/dist/PDF-Reader-Setup-*.exe windows/dist/PDF-Reader-Portable-*.exe`
 
 ## Release notes (English, like earlier releases)
 - What's new, then the **full feature list** (the owner wants features shown on the web page), then per-platform install notes:

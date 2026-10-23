@@ -1,4 +1,5 @@
 // Posts mouse events for UI tests (needs Accessibility permission for the terminal).
+//   mouse click X Y            left-click
 //   mouse right X Y            right-click
 //   mouse drag X1 Y1 X2 Y2     left-drag, slow enough for SwiftUI drag & drop
 import CoreGraphics
@@ -10,6 +11,9 @@ func post(_ type: CGEventType, _ point: CGPoint, _ button: CGMouseButton = .left
 }
 let n = args.dropFirst().map { Double($0)! }
 switch args.first {
+case "click":
+    let p = CGPoint(x: n[0], y: n[1])
+    post(.leftMouseDown, p); usleep(80_000); post(.leftMouseUp, p)
 case "right":
     let p = CGPoint(x: n[0], y: n[1])
     post(.rightMouseDown, p, .right); usleep(80_000); post(.rightMouseUp, p, .right)
@@ -24,5 +28,5 @@ case "drag":
     }
     usleep(300_000); post(.leftMouseUp, to)
 default:
-    print("usage: mouse right X Y | mouse drag X1 Y1 X2 Y2")
+    print("usage: mouse click X Y | mouse right X Y | mouse drag X1 Y1 X2 Y2")
 }

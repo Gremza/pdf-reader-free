@@ -1,7 +1,7 @@
 {
   "name": "pdf-reader-free",
-  "productName": "PDF Reader",
-  "version": "1.3.0",
+  "productName": "PDF Gremza",
+  "version": "1.4.0",
   "description": "A simple, fast and free PDF viewer",
   "author": "Marsel Preci",
   "license": "MIT",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "al.preci.pdfreaderfree",
-    "productName": "PDF Reader",
+    "productName": "PDF Gremza",
     "copyright": "Created by gremza.com open source",
     "directories": {
       "output": "dist"

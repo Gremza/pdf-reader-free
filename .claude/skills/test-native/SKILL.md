@@ -5,7 +5,7 @@ description: Test the native macOS app (Sources/PDFReader) — logic tests with 
 
 # Testing the native macOS app
 
-Never test on the owner's PDFs in place, and never use `build.sh` for testing (it overwrites `/Applications/PDF Reader.app`). Work in the session scratchpad (`$S` below).
+Never test on the owner's PDFs in place, and never use `build.sh` for testing (it overwrites `/Applications/PDF Gremza.app`). Work in the session scratchpad (`$S` below).
 
 ## 1. Logic harness (fast, no UI)
 

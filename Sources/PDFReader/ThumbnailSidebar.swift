@@ -5,6 +5,7 @@ import PDFKit
 struct ThumbnailSidebar: View {
     @ObservedObject var model: PDFViewModel
     @State private var dropTarget: Int?
+    @State private var renderer = ThumbnailRenderer()
     @FocusState private var focused: Bool
 
     private static let dragPrefix = "pdfreader-page:"
@@ -40,7 +41,7 @@ struct ThumbnailSidebar: View {
     private func cell(_ number: Int) -> some View {
         let isCurrent = number == model.currentPage
         return VStack(spacing: 4) {
-            PageThumbnail(model: model, number: number)
+            PageThumbnail(model: model, renderer: renderer, number: number)
                 .padding(3)
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
@@ -62,7 +63,7 @@ struct ThumbnailSidebar: View {
         }
         .contextMenu { pageMenu(number) }
         .draggable(Self.dragPrefix + "\(number)") {
-            PageThumbnail(model: model, number: number)
+            PageThumbnail(model: model, renderer: renderer, number: number)
         }
         .dropDestination(for: String.self) { items, _ in
             drop(items, at: number)
@@ -108,9 +109,32 @@ struct ThumbnailSidebar: View {
     }
 }
 
+/// Renders thumbnails one at a time off the main thread, from its own copy of the document,
+/// so scrolling stays smooth; keeps them until the pages change.
+private actor ThumbnailRenderer {
+    private var revision = -1
+    private var document: PDFDocument?
+    private var images: [Int: NSImage] = [:]
+
+    func image(of number: Int, size: CGSize, revision: Int, source: PDFViewModel.ExportSource) -> NSImage? {
+        if revision != self.revision {
+            self.revision = revision
+            document = source.open()
+            images = [:]
+        }
+        if let image = images[number] { return image }
+        // The thumbnail scrolled out of view before its turn came
+        guard !Task.isCancelled, let page = document?.page(at: number - 1) else { return nil }
+        let image = page.thumbnail(of: size, for: .cropBox)
+        images[number] = image
+        return image
+    }
+}
+
 /// Renders lazily, when the thumbnail scrolls into view, and again after the page changes.
 private struct PageThumbnail: View {
     @ObservedObject var model: PDFViewModel
+    let renderer: ThumbnailRenderer
     let number: Int
     @State private var image: NSImage?
 
@@ -128,9 +152,12 @@ private struct PageThumbnail: View {
         .frame(width: size.width, height: size.height)
         .shadow(color: .black.opacity(0.25), radius: 1.5, y: 0.5)
         .task(id: "\(model.revision)-\(number)") {
-            guard let page = model.pdfView.document?.page(at: number - 1) else { return }
+            guard let source = model.thumbnailSource() else { return }
             let scale = NSScreen.main?.backingScaleFactor ?? 2
-            image = page.thumbnail(of: CGSize(width: size.width * scale, height: size.height * scale), for: .cropBox)
+            let pixels = CGSize(width: size.width * scale, height: size.height * scale)
+            if let rendered = await renderer.image(of: number, size: pixels, revision: model.revision, source: source) {
+                image = rendered
+            }
         }
     }
 

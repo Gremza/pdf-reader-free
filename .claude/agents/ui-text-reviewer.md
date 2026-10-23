@@ -1,6 +1,6 @@
 ---
 name: ui-text-reviewer
-description: Reviews the English UI text of PDF Reader Free (menus, buttons, tooltips, alerts) in both apps for spelling, consistent terminology, capitalization and ellipsis use. Read-only; reports suggested fixes. Use after adding UI text or before a release.
+description: Reviews the English UI text of PDF Gremza (menus, buttons, tooltips, alerts) in both apps for spelling, consistent terminology, capitalization and ellipsis use. Read-only; reports suggested fixes. Use after adding UI text or before a release.
 tools: Read, Grep, Glob
 ---
 

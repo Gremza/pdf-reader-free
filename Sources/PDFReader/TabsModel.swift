@@ -21,8 +21,12 @@ final class TabsModel: ObservableObject {
     static let shared = TabsModel()
 
     @Published private(set) var tabs: [DocumentTab] = []
-    @Published var selectedID: DocumentTab.ID?
+    @Published var selectedID: DocumentTab.ID? {
+        didSet { if isPresenting { presentSelected() } }
+    }
     @Published var isFullScreen = false
+    /// Full Screen Mode: only the page, without the top bar and thumbnails.
+    @Published private(set) var isPresenting = false
     @Published var showThumbnails = true
     weak var window: NSWindow?
 
@@ -129,7 +133,77 @@ final class TabsModel: ObservableObject {
         return discardConfirmed
     }
 
-    func toggleFullScreen() {
-        window?.toggleFullScreen(nil)
+    // MARK: Full Screen Mode
+
+    private weak var presented: PDFViewModel?
+    /// Whether Full Screen Mode put the window into full screen, so leaving it restores the window.
+    private var presentationEnteredFullScreen = false
+    private var presentationMonitor: Any?
+
+    func togglePresentation() {
+        isPresenting ? endPresentation() : startPresentation()
+    }
+
+    func startPresentation() {
+        guard !isPresenting, selected != nil, let window else { return }
+        isPresenting = true
+        presentSelected()
+        presentationEnteredFullScreen = !window.styleMask.contains(.fullScreen)
+        if presentationEnteredFullScreen { window.toggleFullScreen(nil) }
+        presentationMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
+            let handled = MainActor.assumeIsolated { self?.handlePresentationEvent(event) ?? false }
+            return handled ? nil : event
+        }
+        NSCursor.setHiddenUntilMouseMoves(true)
+    }
+
+    func endPresentation() {
+        guard isPresenting else { return }
+        isPresenting = false
+        presented?.setPresenting(false)
+        presented = nil
+        if let presentationMonitor { NSEvent.removeMonitor(presentationMonitor) }
+        presentationMonitor = nil
+        if presentationEnteredFullScreen, let window, window.styleMask.contains(.fullScreen) {
+            window.toggleFullScreen(nil)
+        }
+        presentationEnteredFullScreen = false
+    }
+
+    /// Moves Full Screen Mode along when another tab is selected; ends it when the last tab closes.
+    private func presentSelected() {
+        guard let model = selected?.model else { return endPresentation() }
+        if presented !== model { presented?.setPresenting(false) }
+        presented = model
+        model.setPresenting(true)
+    }
+
+    /// Keys and clicks turn the pages like a presentation; shortcuts with ⌘ still reach the menu bar.
+    /// Returns whether the event was used.
+    private func handlePresentationEvent(_ event: NSEvent) -> Bool {
+        guard isPresenting, event.window === window, let model = presented else { return false }
+        switch event.type {
+        case .leftMouseDown:
+            guard !model.isLink(at: event.locationInWindow) else { return false }
+            model.nextPage()
+        case .rightMouseDown:
+            model.previousPage()
+        default:
+            guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { return false }
+            let shift = event.modifierFlags.contains(.shift)
+            switch (event.specialKey, event.charactersIgnoringModifiers) {
+            case (.rightArrow?, _), (.downArrow?, _), (.pageDown?, _), (.carriageReturn?, _), (.enter?, _):
+                model.nextPage()
+            case (.leftArrow?, _), (.upArrow?, _), (.pageUp?, _), (.delete?, _):
+                model.previousPage()
+            case (.home?, _): model.firstPage()
+            case (.end?, _): model.lastPage()
+            case (_, " "?): shift ? model.previousPage() : model.nextPage()
+            case (_, "\u{1b}"?): endPresentation()
+            default: return false
+            }
+        }
+        NSCursor.setHiddenUntilMouseMoves(true)
+        return true
     }
 }

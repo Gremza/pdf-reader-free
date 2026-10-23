@@ -49,6 +49,8 @@ struct WindowChrome: NSViewRepresentable {
                 observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated {
                         self?.tabs.isFullScreen = entered
+                        // Leaving full screen (green button, Esc) also leaves Full Screen Mode
+                        if !entered { self?.tabs.endPresentation() }
                         self?.positionTrafficLights()
                     }
                 })

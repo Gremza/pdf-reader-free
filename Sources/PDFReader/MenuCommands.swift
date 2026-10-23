@@ -2,6 +2,7 @@ import SwiftUI
 import PDFKit
 
 /// Menu bar versions of the top bar buttons, in the File, Edit, View and Pages menus.
+/// The shortcuts follow Adobe Acrobat Reader.
 struct DocumentCommands: Commands {
     @ObservedObject var tabs: TabsModel
 
@@ -53,6 +54,19 @@ struct DocumentCommands: Commands {
             .keyboardShortcut("z", modifiers: [.command, .shift])
         }
 
+        CommandGroup(after: .pasteboard) {
+            DocumentMenuItems(tabs: tabs) { model in
+                Divider()
+                Button("Search") { model.focusRequest = .search }
+                    .keyboardShortcut("f")
+                    .disabled(model.isPresenting)
+                Button("Find Next", action: model.nextResult)
+                    .keyboardShortcut("g")
+                Button("Find Previous", action: model.previousResult)
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
+        }
+
         CommandMenu("Pages") {
             DocumentMenuItems(tabs: tabs) { model in
                 PageEditItems(model: model)
@@ -63,25 +77,25 @@ struct DocumentCommands: Commands {
             Button(tabs.showThumbnails ? "Hide Thumbnails" : "Show Thumbnails") {
                 withAnimation { tabs.showThumbnails.toggle() }
             }
-            .keyboardShortcut("s", modifiers: [.command, .control])
-            .disabled(tabs.selected == nil)
+            .keyboardShortcut(.f4, modifiers: [])
+            .disabled(tabs.selected == nil || tabs.isPresenting)
             Divider()
         }
 
         CommandGroup(after: .toolbar) {
             DocumentMenuItems(tabs: tabs) { model in
                 Button("Zoom In", action: model.zoomIn)
-                    .keyboardShortcut("+")
+                    .keyboardShortcut("=")
                 Button("Zoom Out", action: model.zoomOut)
                     .keyboardShortcut("-")
-                Button("Actual Size", action: model.actualSize)
-                    .keyboardShortcut("0")
 
                 Divider()
 
-                Toggle("Fit Width", isOn: Binding(get: { model.fitMode == .width }, set: { _ in model.fitWidth() }))
+                Button("Actual Size", action: model.actualSize)
                     .keyboardShortcut("1")
                 Toggle("Fit Page", isOn: Binding(get: { model.fitMode == .page }, set: { _ in model.fitPage() }))
+                    .keyboardShortcut("0")
+                Toggle("Fit Width", isOn: Binding(get: { model.fitMode == .width }, set: { _ in model.fitWidth() }))
                     .keyboardShortcut("2")
 
                 Picker("Layout", selection: Binding(get: { model.layout }, set: { model.layout = $0 })) {
@@ -92,20 +106,32 @@ struct DocumentCommands: Commands {
                 .pickerStyle(.inline)
 
                 Button("Rotate Left") { model.rotate(by: -90) }
-                    .keyboardShortcut("l")
+                    .keyboardShortcut("-", modifiers: [.command, .shift])
                 Button("Rotate Right") { model.rotate(by: 90) }
-                    .keyboardShortcut("r")
+                    .keyboardShortcut("=", modifiers: [.command, .shift])
 
                 Divider()
 
-                Button("Previous Page", action: model.previousPage)
-                    .keyboardShortcut(.upArrow)
+                Button("Previous Page", action: plainKey(model.previousPage))
+                    .keyboardShortcut(.leftArrow, modifiers: [])
                     .disabled(model.currentPage <= 1)
-                Button("Next Page", action: model.nextPage)
-                    .keyboardShortcut(.downArrow)
+                Button("Next Page", action: plainKey(model.nextPage))
+                    .keyboardShortcut(.rightArrow, modifiers: [])
                     .disabled(model.currentPage >= model.pageCount)
+                Button("First Page", action: plainKey(model.firstPage))
+                    .keyboardShortcut(.home, modifiers: [])
+                    .disabled(model.currentPage <= 1)
+                Button("Last Page", action: plainKey(model.lastPage))
+                    .keyboardShortcut(.end, modifiers: [])
+                    .disabled(model.currentPage >= model.pageCount)
+                Button("Go to Page…") { model.focusRequest = .page }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .disabled(model.isPresenting)
 
                 Divider()
+
+                Toggle("Full Screen Mode", isOn: Binding(get: { tabs.isPresenting }, set: { _ in tabs.togglePresentation() }))
+                    .keyboardShortcut("l")
             }
         }
     }
@@ -122,16 +148,36 @@ private struct PageEditItems: View {
             Button("Insert Pages from PDF After Page \(n)…") {
                 model.insertPDFs(after: n, message: "Choose the PDFs to insert")
             }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
             Button("Merge PDFs at End…", action: model.mergePDFs)
             Divider()
             Button("Rotate Page \(n) Left") { model.rotatePage(n, by: -90) }
             Button("Rotate Page \(n) Right") { model.rotatePage(n, by: 90) }
             Divider()
             Button("Delete Page \(n)") { model.deletePage(n) }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(model.pageCount <= 1)
         }
         .disabled(!model.canEdit)
     }
+}
+
+/// Shortcuts without ⌘ (arrows, Home, End) belong to a text field or dialog while it has the keyboard.
+@MainActor
+private func plainKey(_ action: @escaping () -> Void) -> () -> Void {
+    {
+        let window = NSApp.keyWindow
+        if let event = NSApp.currentEvent, event.type == .keyDown, let responder = window?.firstResponder,
+           responder is NSText || window !== TabsModel.shared.window {
+            responder.keyDown(with: event)
+        } else {
+            action()
+        }
+    }
+}
+
+private extension KeyEquivalent {
+    static let f4 = KeyEquivalent(Character(Unicode.Scalar(NSF4FunctionKey)!))
 }
 
 /// Builds menu items for the selected tab's document, shown disabled when no PDF is open.

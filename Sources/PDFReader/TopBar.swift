@@ -16,7 +16,7 @@ struct TopBar: View {
                 Label("Thumbnails", systemImage: "sidebar.left")
             }
             .buttonStyle(BarButtonStyle())
-            .help("Show/hide thumbnails (⌃⌘S)")
+            .help("Show/hide thumbnails (F4)")
             .disabled(tabs.selected == nil)
 
             TabStrip()
@@ -162,20 +162,21 @@ private struct DocumentControls: View {
     @EnvironmentObject private var tabs: TabsModel
     @ObservedObject var model: PDFViewModel
     @State private var pageField = ""
-    @FocusState private var searchFocused: Bool
+    @FocusState private var focusedField: BarField?
 
     var body: some View {
         HStack(spacing: 2) {
             Button(action: model.previousPage) {
                 Label("Previous Page", systemImage: "chevron.up")
             }
-            .help("Previous Page (⌘↑)")
+            .help("Previous Page (←)")
             .disabled(model.currentPage <= 1)
 
             TextField("", text: $pageField)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 40)
                 .multilineTextAlignment(.center)
+                .focused($focusedField, equals: .page)
                 .onSubmit {
                     if let n = Int(pageField) { model.goToPage(n) }
                     pageField = "\(model.currentPage)"
@@ -189,7 +190,7 @@ private struct DocumentControls: View {
             Button(action: model.nextPage) {
                 Label("Next Page", systemImage: "chevron.down")
             }
-            .help("Next Page (⌘↓)")
+            .help("Next Page (→)")
             .disabled(model.currentPage >= model.pageCount)
 
             BarDivider()
@@ -202,7 +203,7 @@ private struct DocumentControls: View {
             Button(action: model.zoomIn) {
                 Label("Zoom In", systemImage: "plus.magnifyingglass")
             }
-            .help("Zoom In (⌘+)")
+            .help("Zoom In (⌘=)")
 
             BarDivider()
 
@@ -210,18 +211,18 @@ private struct DocumentControls: View {
                 Label("Fit Width", systemImage: "arrow.left.and.right.square")
             }
             .symbolVariant(model.fitMode == .width ? .fill : .none)
-            .help("Fit Width (⌘1)")
+            .help("Fit Width (⌘2)")
 
             Button(action: model.fitPage) {
                 Label("Fit Page", systemImage: "arrow.up.and.down.square")
             }
             .symbolVariant(model.fitMode == .page ? .fill : .none)
-            .help("Fit Page (⌘2)")
+            .help("Fit Page (⌘0)")
 
             Button(action: model.actualSize) {
                 Label("Actual Size", systemImage: "1.magnifyingglass")
             }
-            .help("Actual Size 100% (⌘0)")
+            .help("Actual Size 100% (⌘1)")
 
             Menu {
                 Picker("Layout", selection: $model.layout) {
@@ -270,34 +271,29 @@ private struct DocumentControls: View {
             .disabled(model.exportProgress != nil)
             .help("Export every page as a JPG image (⌘E)")
 
-            Button(action: tabs.toggleFullScreen) {
-                Label(tabs.isFullScreen ? "Exit Full Screen" : "Full Screen",
-                      systemImage: tabs.isFullScreen
-                          ? "arrow.down.right.and.arrow.up.left"
-                          : "arrow.up.left.and.arrow.down.right")
+            Button(action: tabs.startPresentation) {
+                Label("Full Screen Mode", systemImage: "arrow.up.left.and.arrow.down.right")
             }
-            .keyboardShortcut("f", modifiers: [.command, .control])
-            .help("Full Screen (⌃⌘F)")
+            .help("Full Screen Mode (⌘L)")
 
             BarDivider()
 
             TextField("Search", text: $model.searchText)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 150)
-                .focused($searchFocused)
+                .focused($focusedField, equals: .search)
                 .onSubmit { model.nextResult() }
                 .onChange(of: model.searchText) { model.search() }
-
-            // Hidden button so ⌘F focuses the search field
-            Button("") { searchFocused = true }
-                .keyboardShortcut("f", modifiers: .command)
-                .frame(width: 0, height: 0)
-                .opacity(0)
-                .accessibilityHidden(true)
         }
         .buttonStyle(BarButtonStyle())
         .onAppear { pageField = "\(model.currentPage)" }
         .onChange(of: model.currentPage) { pageField = "\(model.currentPage)" }
+        // "Search" and "Go to Page…" in the menu bar
+        .onChange(of: model.focusRequest) {
+            guard let field = model.focusRequest else { return }
+            focusedField = field
+            model.focusRequest = nil
+        }
     }
 }
 

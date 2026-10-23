@@ -245,9 +245,6 @@ body.darwin.fullscreen #topbar { padding-left: 6px; }
   pointer-events: none;
 }
 
-#fullscreen .exit, body.fullscreen #fullscreen .enter { display: none; }
-body.fullscreen #fullscreen .exit { display: block; }
-
 /* MARK: Menus */
 
 .menu-anchor { position: relative; flex: none; }
@@ -364,6 +361,23 @@ body.fullscreen #fullscreen .exit { display: block; }
 
 .viewer-container .pdfViewer { padding: 8px 0; }
 .viewer-container .pdfViewer .page { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); border: 0; margin: 8px auto; }
+
+/* MARK: Full Screen Mode: nothing but the page, centered on black */
+
+body.presenting #topbar,
+body.presenting .thumbnails,
+body.presenting .export-progress { display: none; }
+body.hide-cursor, body.hide-cursor * { cursor: none !important; }
+
+.document.presenting .viewer-container { background: #000000; overflow: hidden; }
+.document.presenting .viewer-container .pdfViewer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100%;
+  padding: 0;
+}
+.document.presenting .viewer-container .pdfViewer .page { box-shadow: none; margin: 0 auto; }
 
 /* Reordering pages: a line shows where the dragged page will go */
 .thumb { position: relative; }

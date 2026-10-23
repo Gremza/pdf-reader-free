@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell, systemPreferences } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -14,7 +14,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 // "npm start" would otherwise call the app "Electron" in menus and dialogs
-app.setName("PDF Reader");
+app.setName("PDF Gremza");
+// View > Full Screen Mode replaces the "Enter Full Screen" item macOS adds on its own
+if (process.platform === "darwin") systemPreferences.setUserDefault("NSFullScreenMenuItemEverywhere", "boolean", false);
 
 let win = null;
 let rendererReady = false;
@@ -77,7 +79,7 @@ function createWindow() {
     height: 820,
     minWidth: 860,
     minHeight: 500,
-    title: "PDF Reader",
+    title: "PDF Gremza",
     backgroundColor: overlayColors().color,
     icon: path.join(__dirname, "icon.png"),
     titleBarStyle: "hidden",
@@ -329,7 +331,7 @@ const LAYOUTS = [
 // What the selected tab allows right now, reported by the renderer
 let menuState = {};
 
-/** The same actions as the top bar buttons; each item runs an action of the renderer. */
+/** The same actions as the top bar buttons; each item runs an action of the renderer. The shortcuts follow Adobe Acrobat Reader. */
 function updateAppMenu() {
   const s = menuState;
   const doc = !!s.hasTab;
@@ -337,17 +339,19 @@ function updateAppMenu() {
   const page = s.currentPage ?? 1;
   const run = (action) => () => win?.webContents.send("menu-action", action);
   const item = (label, action, options = {}) => ({ label, click: run(action), ...options });
+  // Keys without Cmd are only shown; the renderer handles them, so text fields keep their arrows, Home and End
+  const plainKey = { registerAccelerator: false };
   const separator = { type: "separator" };
   // Edits of the current page, in both the File and the Pages menu
   const pageEditItems = [
     item(`Insert Blank Page After Page ${page}`, "insertBlankPage", { enabled: edit }),
-    item(`Insert Pages from PDF After Page ${page}…`, "insertPDFs", { enabled: edit }),
+    item(`Insert Pages from PDF After Page ${page}…`, "insertPDFs", { accelerator: "CmdOrCtrl+Shift+I", enabled: edit }),
     item("Merge PDFs at End…", "mergePDFs", { enabled: edit }),
     separator,
     item(`Rotate Page ${page} Left`, "rotatePageLeft", { enabled: edit }),
     item(`Rotate Page ${page} Right`, "rotatePageRight", { enabled: edit }),
     separator,
-    item(`Delete Page ${page}`, "deletePage", { enabled: edit && s.pageCount > 1 }),
+    item(`Delete Page ${page}`, "deletePage", { accelerator: "CmdOrCtrl+Shift+D", enabled: edit && s.pageCount > 1 }),
   ];
 
   const updates = updater.updateState();
@@ -396,37 +400,43 @@ function updateAppMenu() {
       label: "Edit",
       submenu: [
         item("Undo", "undo", { accelerator: "CmdOrCtrl+Z" }),
+        { role: "redo" },
         separator,
         { role: "cut" },
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" },
         separator,
-        item("Search", "focusSearch", { accelerator: "CmdOrCtrl+F", enabled: doc }),
+        item("Search", "focusSearch", { accelerator: "CmdOrCtrl+F", enabled: doc && !s.presenting }),
+        item("Find Next", "findNext", { accelerator: "CmdOrCtrl+G", enabled: doc }),
+        item("Find Previous", "findPrevious", { accelerator: "CmdOrCtrl+Shift+G", enabled: doc }),
       ],
     },
     {
       label: "View",
       submenu: [
-        item("Thumbnails", "toggleThumbnails", { type: "checkbox", checked: !!s.showThumbnails, accelerator: "Ctrl+Cmd+S", enabled: doc }),
+        item(s.showThumbnails ? "Hide Thumbnails" : "Show Thumbnails", "toggleThumbnails", { accelerator: "F4", enabled: doc && !s.presenting }),
         separator,
-        item("Zoom In", "zoomIn", { accelerator: "CmdOrCtrl+Plus", enabled: doc }),
+        item("Zoom In", "zoomIn", { accelerator: "CmdOrCtrl+=", enabled: doc }),
         item("Zoom Out", "zoomOut", { accelerator: "CmdOrCtrl+-", enabled: doc }),
-        item("Actual Size", "actualSize", { accelerator: "CmdOrCtrl+0", enabled: doc }),
         separator,
-        item("Fit Width", "fitWidth", { type: "checkbox", checked: s.fitMode === "width", accelerator: "CmdOrCtrl+1", enabled: doc }),
-        item("Fit Page", "fitPage", { type: "checkbox", checked: s.fitMode === "page", accelerator: "CmdOrCtrl+2", enabled: doc }),
+        item("Actual Size", "actualSize", { accelerator: "CmdOrCtrl+1", enabled: doc }),
+        item("Fit Page", "fitPage", { type: "checkbox", checked: s.fitMode === "page", accelerator: "CmdOrCtrl+0", enabled: doc }),
+        item("Fit Width", "fitWidth", { type: "checkbox", checked: s.fitMode === "width", accelerator: "CmdOrCtrl+2", enabled: doc }),
         separator,
         ...LAYOUTS.map(([layout, label]) =>
           item(label, `layout:${layout}`, { type: "radio", checked: s.layout === layout, enabled: doc })),
         separator,
-        item("Rotate Left", "rotateLeft", { accelerator: "CmdOrCtrl+L", enabled: doc }),
-        item("Rotate Right", "rotateRight", { accelerator: "CmdOrCtrl+R", enabled: doc }),
+        item("Rotate Left", "rotateLeft", { accelerator: "CmdOrCtrl+Shift+-", enabled: doc }),
+        item("Rotate Right", "rotateRight", { accelerator: "CmdOrCtrl+Shift+=", enabled: doc }),
         separator,
-        item("Previous Page", "previousPage", { accelerator: "CmdOrCtrl+Up", enabled: doc && page > 1 }),
-        item("Next Page", "nextPage", { accelerator: "CmdOrCtrl+Down", enabled: doc && page < s.pageCount }),
+        item("Previous Page", "previousPage", { accelerator: "Left", ...plainKey, enabled: doc && page > 1 }),
+        item("Next Page", "nextPage", { accelerator: "Right", ...plainKey, enabled: doc && page < s.pageCount }),
+        item("First Page", "firstPage", { accelerator: "Home", ...plainKey, enabled: doc && page > 1 }),
+        item("Last Page", "lastPage", { accelerator: "End", ...plainKey, enabled: doc && page < s.pageCount }),
+        item("Go to Page…", "goToPage", { accelerator: "CmdOrCtrl+Shift+N", enabled: doc && !s.presenting }),
         separator,
-        { role: "togglefullscreen" },
+        item("Full Screen Mode", "fullScreen", { type: "checkbox", checked: !!s.presenting, accelerator: "CmdOrCtrl+L", enabled: doc }),
       ],
     },
     {
@@ -468,4 +478,15 @@ ipcMain.on("set-update-setting", (_event, key, value) => updater.setUpdateSettin
 ipcMain.on("open-paths", (_event, paths) => openPaths(paths));
 ipcMain.on("open-failed", (_event, names) => showOpenError(names));
 ipcMain.on("close-window", () => win?.close());
-ipcMain.on("toggle-fullscreen", () => win?.setFullScreen(!win.isFullScreen()));
+// Full Screen Mode puts the window into full screen and restores it afterwards, unless it was full screen already
+let presentationEnteredFullScreen = false;
+ipcMain.on("set-presenting", (_event, presenting) => {
+  if (!win) return;
+  if (presenting) {
+    presentationEnteredFullScreen = !win.isFullScreen();
+    if (presentationEnteredFullScreen) win.setFullScreen(true);
+  } else {
+    if (presentationEnteredFullScreen && win.isFullScreen()) win.setFullScreen(false);
+    presentationEnteredFullScreen = false;
+  }
+});

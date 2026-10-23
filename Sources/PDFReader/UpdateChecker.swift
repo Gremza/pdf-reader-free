@@ -77,7 +77,7 @@ final class UpdateChecker: ObservableObject {
             return
         }
         guard Self.isNewer(release.version, than: currentVersion) else {
-            if manual { showAlert("PDF Reader is up to date", "Version \(currentVersion) is the newest version.") }
+            if manual { showAlert("PDF Gremza is up to date", "Version \(currentVersion) is the newest version.") }
             return
         }
 
@@ -134,7 +134,7 @@ final class UpdateChecker: ObservableObject {
             try await Task.detached {
                 let (zip, _) = try await URLSession.shared.download(from: asset)
                 let folder = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("PDF Reader Update \(UUID().uuidString)")
+                    .appendingPathComponent("PDF Gremza Update \(UUID().uuidString)")
                 defer { try? FileManager.default.removeItem(at: folder) }
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, folder.path])
@@ -146,7 +146,7 @@ final class UpdateChecker: ObservableObject {
                       bundle.bundleIdentifier == bundleID,
                       let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                       !UpdateChecker.isNewer(version, than: release.version), !UpdateChecker.isNewer(release.version, than: version)
-                else { throw UpdateError("The download doesn't contain the expected version of PDF Reader.") }
+                else { throw UpdateError("The download doesn't contain the expected version of PDF Gremza.") }
                 _ = try FileManager.default.replaceItemAt(appURL, withItemAt: newApp)
             }.value
             installedVersion = release.version
@@ -196,8 +196,8 @@ final class UpdateChecker: ObservableObject {
 
     private func askToInstall(_ release: Release) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "A new version of PDF Reader is available"
-        alert.informativeText = "PDF Reader \(release.version) is available. You have \(currentVersion). Would you like to install it now?"
+        alert.messageText = "A new version of PDF Gremza is available"
+        alert.informativeText = "PDF Gremza \(release.version) is available. You have \(currentVersion). Would you like to install it now?"
         alert.addButton(withTitle: "Install and Restart")
         alert.addButton(withTitle: "Later")
         return alert.runModal() == .alertFirstButtonReturn
@@ -205,8 +205,8 @@ final class UpdateChecker: ObservableObject {
 
     private func askToDownload(_ release: Release) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "A new version of PDF Reader is available"
-        alert.informativeText = "PDF Reader \(release.version) is available. You have \(currentVersion)."
+        alert.messageText = "A new version of PDF Gremza is available"
+        alert.informativeText = "PDF Gremza \(release.version) is available. You have \(currentVersion)."
         alert.addButton(withTitle: "Open Download Page")
         alert.addButton(withTitle: "Later")
         return alert.runModal() == .alertFirstButtonReturn
@@ -214,8 +214,8 @@ final class UpdateChecker: ObservableObject {
 
     private func askToRestart(version: String) {
         let alert = NSAlert()
-        alert.messageText = "PDF Reader \(version) is ready"
-        alert.informativeText = "The update will be used after you restart PDF Reader."
+        alert.messageText = "PDF Gremza \(version) is ready"
+        alert.informativeText = "The update will be used after you restart PDF Gremza."
         alert.addButton(withTitle: "Restart Now")
         alert.addButton(withTitle: "Later")
         if alert.runModal() == .alertFirstButtonReturn { restart() }
@@ -234,7 +234,7 @@ struct UpdateError: LocalizedError {
     init(_ message: String) { errorDescription = message }
 }
 
-/// "Check for Updates…" and the update settings, in the app menu below "About PDF Reader".
+/// "Check for Updates…" and the update settings, in the app menu below "About PDF Gremza".
 struct UpdateMenuItems: View {
     @ObservedObject var updater: UpdateChecker
 

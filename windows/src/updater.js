@@ -10,6 +10,8 @@ const LATEST_RELEASE = "https://api.github.com/repos/Gremza/pdf-reader-free/rele
 const DAY = 24 * 60 * 60 * 1000;
 
 const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
+// Versions before 1.4 were called "PDF Reader" and kept their settings under that name
+const oldSettingsFile = () => path.join(app.getPath("appData"), "PDF Reader", "settings.json");
 const settings = { checkForUpdates: true, installUpdatesAutomatically: false };
 
 let getWindow = () => null;
@@ -29,10 +31,13 @@ const canInstall = () => installerBuild() || (app.isPackaged && !!portableExe);
 function startUpdater(window, changed) {
   getWindow = window;
   onChange = changed;
-  try {
-    Object.assign(settings, JSON.parse(fs.readFileSync(settingsFile(), "utf8")));
-  } catch {
-    // First launch: keep the defaults
+  for (const file of [settingsFile(), oldSettingsFile()]) {
+    try {
+      Object.assign(settings, JSON.parse(fs.readFileSync(file, "utf8")));
+      break;
+    } catch {
+      // First launch: keep the defaults
+    }
   }
   if (portableExe) fs.rm(`${portableExe}.old`, { force: true }, () => {});
   setTimeout(checkInBackground, 5000);
@@ -82,22 +87,22 @@ async function check(manual) {
       return;
     }
     if (!isNewer(release.version, current)) {
-      if (manual) await message("PDF Reader is up to date", `Version ${current} is the newest version.`);
+      if (manual) await message("PDF Gremza is up to date", `Version ${current} is the newest version.`);
       return;
     }
 
     const asset = release.assets.find((item) => assetPattern().test(item.name));
     if (!canInstall() || !asset) {
-      const choice = await message("A new version of PDF Reader is available",
-        `PDF Reader ${release.version} is available. You have ${current}.`, ["Open Download Page", "Later"]);
+      const choice = await message("A new version of PDF Gremza is available",
+        `PDF Gremza ${release.version} is available. You have ${current}.`, ["Open Download Page", "Later"]);
       if (choice === 0) shell.openExternal(RELEASES_PAGE);
       return;
     }
     if (settings.installUpdatesAutomatically && !manual) {
       if (await download(release.version, asset)) await askToRestart(release.version);
     } else {
-      const choice = await message("A new version of PDF Reader is available",
-        `PDF Reader ${release.version} is available. You have ${current}. Would you like to install it now?`,
+      const choice = await message("A new version of PDF Gremza is available",
+        `PDF Gremza ${release.version} is available. You have ${current}. Would you like to install it now?`,
         ["Install and Restart", "Later"]);
       if (choice === 0 && await download(release.version, asset)) restart();
     }
@@ -135,7 +140,7 @@ function isNewer(version, other) {
 /** Downloads the setup or portable .exe into the temp folder, with progress on the taskbar. */
 async function download(version, asset) {
   const win = getWindow();
-  const file = path.join(app.getPath("temp"), "PDF Reader Update", asset.name);
+  const file = path.join(app.getPath("temp"), "PDF Gremza Update", asset.name);
   try {
     await fs.promises.mkdir(path.dirname(file), { recursive: true });
     const response = await net.fetch(asset.browser_download_url);
@@ -199,7 +204,7 @@ function installPendingUpdate() {
 }
 
 function askToRestart(version) {
-  return message(`PDF Reader ${version} is ready`, "The update will be used after you restart PDF Reader.", ["Restart Now", "Later"])
+  return message(`PDF Gremza ${version} is ready`, "The update will be used after you restart PDF Gremza.", ["Restart Now", "Later"])
     .then((choice) => { if (choice === 0) restart(); });
 }
 

@@ -80,6 +80,8 @@ const state = {
   tabs: [],
   selected: null,
   showThumbnails: true,
+  // Full Screen Mode: only the page of the selected tab, like a presentation
+  presenting: false,
   // Update settings and whether a check is running, from the main process
   updates: {},
 };
@@ -99,7 +101,7 @@ class DocumentTab {
     this.savedBytes = file.data;
     this.history = [];
     this.fitMode = "width";
-    this.layout = "continuous";
+    this.layout = "single";
     this.currentPage = 1;
     this.searchText = "";
     this.matches = { current: 0, total: 0 };
@@ -128,6 +130,9 @@ class DocumentTab {
     this.eventBus.on("pagesinit", () => {
       this.applyLayout();
       this.applyFit();
+      // A new document starts without a zoom; keep the one the user chose
+      if (this.fitMode === "custom" && this.pendingScale) this.viewer.currentScaleValue = this.pendingScale;
+      this.pendingScale = null;
       // After an edit, stay on the page the user was working on
       if (this.pendingPage) {
         this.viewer.currentPageNumber = this.pendingPage;
@@ -168,6 +173,8 @@ class DocumentTab {
   }
 
   get pageCount() { return this.pdf.numPages; }
+  /** Full Screen Mode always shows single pages, whatever the layout. */
+  get displayLayout() { return this.presenting ? "single" : this.layout; }
   get isDirty() { return this.bytes !== this.savedBytes; }
   get baseName() { return this.name.replace(/\.pdf$/i, ""); }
 
@@ -187,6 +194,26 @@ class DocumentTab {
 
   previousPage() { this.viewer.previousPage(); }
   nextPage() { this.viewer.nextPage(); }
+
+  // MARK: Full Screen Mode
+
+  /** Shows one fitted page at a time on black, without page borders or scroll bars; the layout and zoom come back afterwards. */
+  setPresenting(presenting) {
+    if (presenting === !!this.presenting) return;
+    const page = this.currentPage;
+    if (presenting) {
+      this.beforePresenting = { fitMode: this.fitMode, scale: this.viewer.currentScaleValue };
+      this.fitMode = "page";
+    } else {
+      this.fitMode = this.beforePresenting.fitMode;
+    }
+    this.presenting = presenting;
+    this.element.classList.toggle("presenting", presenting);
+    this.applyLayout();
+    if (this.fitMode === "custom") this.viewer.currentScaleValue = this.beforePresenting.scale;
+    this.applyFit();
+    this.viewer.currentPageNumber = page;
+  }
 
   // MARK: Zoom
 
@@ -224,7 +251,7 @@ class DocumentTab {
   /** pdf.js "page-fit" ignores the second page of a spread, so two-page layouts are fitted by hand. */
   fitPageSpread() {
     const pageView = this.viewer.getPageView(this.currentPage - 1);
-    if (LAYOUTS[this.layout].spread === SpreadMode.NONE || !pageView) {
+    if (LAYOUTS[this.displayLayout].spread === SpreadMode.NONE || !pageView) {
       this.viewer.currentScaleValue = "page-fit";
       return;
     }
@@ -247,7 +274,7 @@ class DocumentTab {
   }
 
   applyLayout() {
-    const { scroll, spread } = LAYOUTS[this.layout];
+    const { scroll, spread } = LAYOUTS[this.displayLayout];
     this.viewer.scrollMode = scroll;
     this.viewer.spreadMode = spread;
   }
@@ -293,6 +320,7 @@ class DocumentTab {
     this.bytes = bytes;
     this.pdf = pdf;
     this.currentPage = this.pendingPage = Math.min(Math.max(page, 1), pdf.numPages);
+    this.pendingScale = this.viewer.currentScaleValue;
     this.matches = { current: 0, total: 0 };
     this.viewer.setDocument(pdf);
     this.linkService.setDocument(pdf);
@@ -521,10 +549,14 @@ class DocumentTab {
     const viewport = first.getViewport({ scale: 1 });
     this.thumbnailObserver?.disconnect();
     this.thumbnails.replaceChildren();
+    // Thumbnails near the visible area wait here; ones scrolled away before their turn are dropped
+    this.thumbnailQueue = new Set();
     this.thumbnailObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
-        if (entry.isIntersecting) this.renderThumbnail(entry.target);
+        if (entry.isIntersecting) this.thumbnailQueue.add(entry.target);
+        else this.thumbnailQueue.delete(entry.target);
       }
+      this.renderThumbnails();
     }, { root: this.thumbnails, rootMargin: "300px 0px" });
 
     const fragment = document.createDocumentFragment();
@@ -588,6 +620,18 @@ class DocumentTab {
       const insertAt = after ? number + 1 : number;
       this.movePage(from, insertAt > from ? insertAt - 1 : insertAt);
     });
+  }
+
+  /** Renders one thumbnail at a time, so scrolling the sidebar stays smooth. */
+  async renderThumbnails() {
+    if (this.renderingThumbnails) return;
+    this.renderingThumbnails = true;
+    while (this.thumbnailQueue.size) {
+      const [button] = this.thumbnailQueue;
+      this.thumbnailQueue.delete(button);
+      if (button.isConnected) await this.renderThumbnail(button);
+    }
+    this.renderingThumbnails = false;
   }
 
   async renderThumbnail(button) {
@@ -665,6 +709,12 @@ function select(tab) {
   if (state.selected === tab) return;
   closeMenus();
   if (state.selected) state.selected.element.hidden = true;
+  // Full Screen Mode moves along to the selected tab and ends when the last tab closes
+  if (state.presenting) {
+    state.selected?.setPresenting(false);
+    if (tab) tab.setPresenting(true);
+    else endPresentation();
+  }
   state.selected = tab;
   if (tab) {
     tab.element.hidden = false;
@@ -689,6 +739,7 @@ async function close(tab) {
     state.selected = null;
     select(state.tabs[Math.min(index, state.tabs.length - 1)] ?? null);
   }
+  if (!state.selected) endPresentation();
   tab.destroy();
   render();
   updateDirtyCount();
@@ -884,6 +935,7 @@ function syncMenu() {
     hasTab: !!tab,
     tabCount: state.tabs.length,
     showThumbnails: state.showThumbnails,
+    presenting: state.presenting,
     canEdit: tab?.canEdit ?? false,
     isDirty: tab?.isDirty ?? false,
     canUndo: (tab?.history.length ?? 0) > 0,
@@ -937,9 +989,9 @@ function showDocumentMenu() {
     { id: "undo", label: "Undo", accelerator: "Ctrl+Z", enabled: enabled && tab.history.length > 0 },
     { type: "separator" },
     { id: "blank", label: `Insert Blank Page After Page ${n}`, enabled },
-    { id: "insert", label: `Insert Pages from PDF After Page ${n}…`, enabled },
+    { id: "insert", label: `Insert Pages from PDF After Page ${n}…`, accelerator: "Ctrl+Shift+I", enabled },
     { id: "merge", label: "Merge PDFs at End…", enabled },
-    { id: "delete", label: `Delete Page ${n}`, accelerator: "Delete", enabled: enabled && tab.pageCount > 1 },
+    { id: "delete", label: `Delete Page ${n}`, accelerator: "Ctrl+Shift+D", enabled: enabled && tab.pageCount > 1 },
     { type: "separator" },
     { id: "rotateLeft", label: `Rotate Page ${n} Left`, enabled },
     { id: "rotateRight", label: `Rotate Page ${n} Right`, enabled },
@@ -1004,6 +1056,63 @@ function showUpdatesMenu() {
   });
 }
 
+// MARK: - Full Screen Mode
+
+function startPresentation() {
+  const tab = state.selected;
+  if (state.presenting || !tab) return;
+  closeMenus();
+  state.presenting = true;
+  document.body.classList.add("presenting", "hide-cursor");
+  tab.setPresenting(true);
+  tab.container.focus({ preventScroll: true });
+  window.host.setPresenting(true);
+  syncMenu();
+}
+
+function endPresentation() {
+  if (!state.presenting) return;
+  state.presenting = false;
+  document.body.classList.remove("presenting", "hide-cursor");
+  state.selected?.setPresenting(false);
+  window.host.setPresenting(false);
+  updateControls();
+}
+
+/** Keys of Full Screen Mode, like a presentation; shortcuts with Ctrl still work. */
+const presentationKeys = {
+  "ArrowRight": "nextPage",
+  "ArrowDown": "nextPage",
+  "PageDown": "nextPage",
+  "Enter": "nextPage",
+  " ": "nextPage",
+  "ArrowLeft": "previousPage",
+  "ArrowUp": "previousPage",
+  "PageUp": "previousPage",
+  "Backspace": "previousPage",
+  "Shift+ ": "previousPage",
+  "Home": "firstPage",
+  "End": "lastPage",
+  "Escape": "fullScreen",
+};
+
+// A click goes to the next page and a right click to the previous one; links still work
+el.documents.addEventListener("click", (event) => {
+  if (!state.presenting || event.target.closest("a")) return;
+  actions.nextPage();
+  document.body.classList.add("hide-cursor");
+});
+el.documents.addEventListener("contextmenu", (event) => {
+  if (!state.presenting) return;
+  event.preventDefault();
+  actions.previousPage();
+  document.body.classList.add("hide-cursor");
+});
+// The pointer hides while presenting and comes back when the mouse moves
+document.addEventListener("mousemove", (event) => {
+  if (event.movementX || event.movementY) document.body.classList.remove("hide-cursor");
+});
+
 // MARK: - Actions
 
 function withTab(action) {
@@ -1022,6 +1131,13 @@ const actions = {
   previousTab: () => selectOffset(-1),
   previousPage: withTab((tab) => tab.previousPage()),
   nextPage: withTab((tab) => tab.nextPage()),
+  firstPage: withTab((tab) => tab.goToPage(1)),
+  lastPage: withTab((tab) => tab.goToPage(tab.pageCount)),
+  goToPage: withTab(() => {
+    if (state.presenting) return;
+    el.pageField.focus();
+    el.pageField.select();
+  }),
   zoomIn: withTab((tab) => tab.zoomIn()),
   zoomOut: withTab((tab) => tab.zoomOut()),
   fitWidth: withTab((tab) => tab.fitWidth()),
@@ -1033,12 +1149,16 @@ const actions = {
   save: withTab((tab) => tab.save()),
   saveAs: withTab((tab) => tab.saveAs()),
   undo: withTab((tab) => tab.undo()),
-  fullScreen: () => window.host.toggleFullScreen(),
+  fullScreen: () => (state.presenting ? endPresentation() : startPresentation()),
   focusSearch: withTab(() => {
+    if (state.presenting) return;
     el.searchField.focus();
     el.searchField.select();
   }),
+  findNext: withTab((tab) => tab.search(true, false)),
+  findPrevious: withTab((tab) => tab.search(true, true)),
   toggleThumbnails: () => {
+    if (!state.selected || state.presenting) return;
     state.showThumbnails = !state.showThumbnails;
     state.selected?.element.classList.toggle("no-thumbs", !state.showThumbnails);
     syncMenu();
@@ -1109,48 +1229,67 @@ el.searchField.addEventListener("keydown", (event) => {
 
 // MARK: - Keyboard shortcuts
 
+// The same as Adobe Acrobat Reader
 const shortcuts = {
   "Ctrl+o": "open",
   "Ctrl+w": "closeTab",
   "Ctrl+F4": "closeTab",
   "Ctrl+Tab": "nextTab",
   "Ctrl+Shift+Tab": "previousTab",
-  "Ctrl+PageDown": "nextTab",
-  "Ctrl+PageUp": "previousTab",
-  "Ctrl+Shift+]": "nextTab",
-  "Ctrl+Shift+[": "previousTab",
-  "Ctrl+ArrowUp": "previousPage",
-  "Ctrl+ArrowDown": "nextPage",
+  "Ctrl+F6": "nextTab",
+  "Ctrl+Shift+F6": "previousTab",
+  // Shift turns "]" into "}" and "[" into "{"
+  "Ctrl+Shift+}": "nextTab",
+  "Ctrl+Shift+{": "previousTab",
+  "ArrowLeft": "previousPage",
+  "ArrowRight": "nextPage",
+  "Ctrl+PageUp": "previousPage",
+  "Ctrl+PageDown": "nextPage",
+  "Home": "firstPage",
+  "End": "lastPage",
+  "Ctrl+Shift+n": "goToPage",
   "Ctrl+=": "zoomIn",
   "Ctrl++": "zoomIn",
-  "Ctrl+Shift++": "zoomIn",
   "Ctrl+-": "zoomOut",
-  "Ctrl+1": "fitWidth",
-  "Ctrl+2": "fitPage",
-  "Ctrl+0": "actualSize",
-  "Ctrl+l": "rotateLeft",
-  "Ctrl+r": "rotateRight",
+  "Ctrl+1": "actualSize",
+  "Ctrl+0": "fitPage",
+  "Ctrl+2": "fitWidth",
+  // Shift turns "=" into "+" and "-" into "_"
+  "Ctrl+Shift++": "rotateRight",
+  "Ctrl+Shift+_": "rotateLeft",
+  "Ctrl+Shift+-": "rotateLeft",
   "Ctrl+e": "exportJPG",
   "Ctrl+s": "save",
   "Ctrl+Shift+s": "saveAs",
   "Ctrl+z": "undo",
+  "Ctrl+Shift+i": "insertPDFs",
+  "Ctrl+Shift+d": "deletePage",
+  "F4": "toggleThumbnails",
+  "Ctrl+l": "fullScreen",
   "F11": "fullScreen",
   "Ctrl+f": "focusSearch",
+  "Ctrl+g": "findNext",
+  "Ctrl+Shift+g": "findPrevious",
+  "F3": "findNext",
+  "Shift+F3": "findPrevious",
 };
 
+// Text fields keep these keys for themselves
+const fieldKeys = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "Ctrl+z"]);
+
 document.addEventListener("keydown", (event) => {
+  if (el.promptDialog.open) return;
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const combo = [event.ctrlKey && "Ctrl", event.shiftKey && "Shift", event.altKey && "Alt", key].filter(Boolean).join("+");
-  const action = shortcuts[combo];
-  // Text fields keep their own undo
+  const action = (state.presenting && presentationKeys[combo]) || shortcuts[combo];
   const inField = event.target instanceof HTMLInputElement;
-  if (action && !(inField && action === "undo") && !el.promptDialog.open) {
+  if (action && !(inField && fieldKeys.has(combo))) {
     event.preventDefault();
     closeMenus();
     actions[action]();
+    if (state.presenting) document.body.classList.add("hide-cursor");
   } else if (event.key === "Escape") {
-    if (!el.layoutMenu.hidden || !el.overflowMenu.hidden) closeMenus();
-    else if (document.body.classList.contains("fullscreen")) actions.fullScreen();
+    closeMenus();
   }
 });
 
@@ -1203,7 +1342,8 @@ window.host.onUpdateProgress((fraction) => {
 });
 window.host.onFullScreen((value) => {
   document.body.classList.toggle("fullscreen", value);
-  el.fullscreen.title = value ? "Exit Full Screen (F11)" : "Full Screen (F11)";
+  // Leaving full screen some other way also leaves Full Screen Mode
+  if (!value) endPresentation();
 });
 document.body.classList.add(window.host.platform);
 new ResizeObserver(renderTabs).observe(el.tabstrip);

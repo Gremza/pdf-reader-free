@@ -6,6 +6,11 @@ enum FitMode {
     case width, page, custom
 }
 
+/// A text field of the top bar that a menu item can focus.
+enum BarField {
+    case page, search
+}
+
 /// A running export, e.g. ("Exporting", 3, 10).
 struct ExportProgress {
     var label: String
@@ -74,6 +79,10 @@ final class PDFViewModel: ObservableObject {
     @Published var currentPage = 1
     @Published var pageCount = 0
     @Published var searchText = ""
+    /// Set by the menu bar; the top bar focuses the field and clears it.
+    @Published var focusRequest: BarField?
+    /// Full Screen Mode: one page at a time on black, like a presentation.
+    @Published private(set) var isPresenting = false
     /// Pages done so far while exporting; nil when no export is running.
     @Published private(set) var exportProgress: ExportProgress?
     /// Bumps on every change of the document's pages, so thumbnails redraw.
@@ -84,15 +93,17 @@ final class PDFViewModel: ObservableObject {
     @Published private var history: [Snapshot] = []
     private var nextVersion = 1
     @Published private(set) var fitMode = FitMode.width
-    @Published var layout = PageLayout.continuous {
+    @Published var layout = PageLayout.single {
         didSet {
             let page = pdfView.currentPage
-            pdfView.displayMode = layout.displayMode
+            pdfView.displayMode = displayMode
             applyFit()
             if let page { pdfView.go(to: page) }
         }
     }
 
+    private var fitBeforePresenting = FitMode.width
+    private var scaleBeforePresenting: CGFloat = 1
     private var searchResults: [PDFSelection] = []
     private var searchIndex = 0
     private var observers: [NSObjectProtocol] = []
@@ -102,6 +113,8 @@ final class PDFViewModel: ObservableObject {
     /// Edits wait while an export reads the document.
     var canEdit: Bool { exportProgress == nil }
     var baseName: String { url.deletingPathExtension().lastPathComponent }
+    /// Full Screen Mode always shows single pages, whatever the layout.
+    private var displayMode: PDFDisplayMode { isPresenting ? .singlePage : layout.displayMode }
 
     init(document: PDFDocument, url: URL) {
         self.url = url
@@ -144,6 +157,46 @@ final class PDFViewModel: ObservableObject {
 
     func previousPage() { pdfView.goToPreviousPage(nil) }
     func nextPage() { pdfView.goToNextPage(nil) }
+    func firstPage() { pdfView.goToFirstPage(nil) }
+    func lastPage() { pdfView.goToLastPage(nil) }
+
+    // MARK: Full Screen Mode
+
+    /// Shows one fitted page at a time on black, without page borders or scroll bars;
+    /// the layout and zoom come back afterwards.
+    func setPresenting(_ presenting: Bool) {
+        guard presenting != isPresenting else { return }
+        let page = pdfView.currentPage
+        if presenting {
+            fitBeforePresenting = fitMode
+            scaleBeforePresenting = pdfView.scaleFactor
+            fitMode = .page
+        } else {
+            fitMode = fitBeforePresenting
+        }
+        isPresenting = presenting
+        pdfView.displayMode = displayMode
+        pdfView.displaysPageBreaks = !presenting
+        pdfView.pageShadowsEnabled = !presenting
+        pdfView.backgroundColor = presenting ? .black : .windowBackgroundColor
+        if let scrollView = pdfView.documentView?.enclosingScrollView {
+            scrollView.hasVerticalScroller = !presenting
+            scrollView.hasHorizontalScroller = !presenting
+        }
+        if fitMode == .custom {
+            pdfView.autoScales = false
+            pdfView.scaleFactor = scaleBeforePresenting
+        }
+        applyFit()
+        if let page { pdfView.go(to: page) }
+    }
+
+    /// Clicking a link in Full Screen Mode follows it instead of turning the page.
+    func isLink(at windowPoint: NSPoint) -> Bool {
+        let point = pdfView.convert(windowPoint, from: nil)
+        guard let page = pdfView.page(for: point, nearest: false) else { return false }
+        return page.annotation(at: pdfView.convert(point, to: page))?.type == "Link"
+    }
 
     // MARK: Zoom
 
@@ -185,8 +238,8 @@ final class PDFViewModel: ObservableObject {
             guard let page = pdfView.currentPage ?? pdfView.document?.page(at: 0) else { return }
             var size = page.bounds(for: pdfView.displayBox).size
             if page.rotation % 180 != 0 { size = CGSize(width: size.height, height: size.width) }
-            if layout == .twoUp || layout == .twoUpContinuous { size.width *= 2 }
-            let margin: CGFloat = 16
+            if displayMode == .twoUp || displayMode == .twoUpContinuous { size.width *= 2 }
+            let margin: CGFloat = isPresenting ? 0 : 16
             let available = pdfView.bounds.insetBy(dx: margin, dy: margin).size
             guard size.width > 0, size.height > 0, available.width > 0, available.height > 0 else { return }
             pdfView.autoScales = false
@@ -281,6 +334,23 @@ final class PDFViewModel: ObservableObject {
             case .data(let data): PDFDocument(data: data)
             }
         }
+    }
+
+    private var thumbnailSnapshot: (revision: Int, source: ExportSource)?
+
+    /// The pages as of `revision`, for thumbnails rendered off the main thread; read once per change.
+    func thumbnailSource() -> ExportSource? {
+        if let thumbnailSnapshot, thumbnailSnapshot.revision == revision { return thumbnailSnapshot.source }
+        let source: ExportSource
+        if !isDirty {
+            source = .file(url)
+        } else if let data = pdfView.document?.dataRepresentation() {
+            source = .data(data)
+        } else {
+            return nil
+        }
+        thumbnailSnapshot = (revision, source)
+        return source
     }
 
     /// The saved file when nothing changed (also works for protected PDFs), otherwise the edited document.
@@ -416,7 +486,7 @@ final class PDFViewModel: ObservableObject {
         guard canUndo, let snapshot = history.popLast(), let doc = PDFDocument(data: snapshot.data) else { return }
         let page = currentPage
         pdfView.document = doc
-        pdfView.displayMode = layout.displayMode
+        pdfView.displayMode = displayMode
         version = snapshot.version
         documentChanged(page: page)
     }
@@ -646,6 +716,12 @@ final class PDFViewModel: ObservableObject {
     func nextResult() {
         guard !searchResults.isEmpty else { return search() }
         searchIndex = (searchIndex + 1) % searchResults.count
+        showCurrentResult()
+    }
+
+    func previousResult() {
+        guard !searchResults.isEmpty else { return search() }
+        searchIndex = (searchIndex - 1 + searchResults.count) % searchResults.count
         showCurrentResult()
     }
 

@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld("host", {
   setDirtyCount: (count) => ipcRenderer.send("set-dirty-count", count),
   popupMenu: (items, x, y) => ipcRenderer.invoke("popup-menu", items, x, y),
   closeWindow: () => ipcRenderer.send("close-window"),
-  toggleFullScreen: () => ipcRenderer.send("toggle-fullscreen"),
+  setPresenting: (presenting) => ipcRenderer.send("set-presenting", presenting),
   setMenuState: (state) => ipcRenderer.send("menu-state", state),
   checkForUpdates: () => ipcRenderer.send("check-for-updates"),
   setUpdateSetting: (key, value) => ipcRenderer.send("set-update-setting", key, value),

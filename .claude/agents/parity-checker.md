@@ -4,7 +4,7 @@ description: Compares the native macOS app (Sources/PDFReader) with the Windows 
 tools: Read, Grep, Glob
 ---
 
-You check feature parity in PDF Reader Free. Read `CLAUDE.md` for the architecture.
+You check feature parity in PDF Gremza. Read `CLAUDE.md` for the architecture.
 
 Build two inventories, then diff them:
 

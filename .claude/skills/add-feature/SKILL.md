@@ -1,6 +1,6 @@
 ---
 name: add-feature
-description: Add or change a feature in PDF Reader Free so the native macOS app and the Windows (Electron) app stay equal — where each piece goes, English wording, menus, shortcuts, tests. Use for any new command, edit, export or UI control.
+description: Add or change a feature in PDF Gremza so the native macOS app and the Windows (Electron) app stay equal — where each piece goes, English wording, menus, shortcuts, tests. Use for any new command, edit, export or UI control.
 ---
 
 # Adding a feature to both apps

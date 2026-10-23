@@ -5,8 +5,13 @@ struct PDFReaderApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var tabs = TabsModel.shared
 
+    init() {
+        // View ▸ Full Screen Mode replaces the "Enter Full Screen" item AppKit adds on its own
+        UserDefaults.standard.register(defaults: ["NSFullScreenMenuItemEverywhere": false])
+    }
+
     var body: some Scene {
-        Window("PDF Reader", id: "main") {
+        Window("PDF Gremza", id: "main") {
             ContentView()
                 .environmentObject(tabs)
         }
