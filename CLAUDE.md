@@ -23,6 +23,7 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
 - The owner's keychain has **two identical "Apple Development" certificates**, so electron-builder signing with an identity fails as "ambiguous". The `mac` build config uses `identity: "-"` (ad-hoc) and `hardenedRuntime: false` for that reason.
 - Version numbers live in `Resources/Info.plist` (`CFBundleShortVersionString`, `CFBundleVersion`) and `windows/package.json` (`version`). Keep both in step.
 - Releases: GitHub `Gremza/pdf-reader-free`, published with `gh release create`. See the `release` skill. **The update check depends on the asset names** (`PDF-Reader.zip`, `PDF-Reader-{Setup,Portable}-<ver>-x64.exe`) and on the tag (`v1.3`) matching the app versions. The app was renamed from "PDF Reader" to "PDF Gremza" after 1.3; the asset names keep the old name so that installed 1.3 apps still find their update. The macOS update recognizes the app by bundle id, not by name.
+- The main web page is **https://gremza.com/pdf-reader/** (Albanian, part of the gremza.com static site); the release skill says how to update it.
 - Website: `docs/index.html` on GitHub Pages (https://gremza.github.io/pdf-reader-free/), served from `main` /docs. The download buttons pick their files from the latest release through the GitHub API, so a new release needs no page edit unless the features change. Keep its feature list in step with the README.
 
 ## macOS architecture (`Sources/PDFReader/`)
