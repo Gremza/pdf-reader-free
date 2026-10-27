@@ -13,13 +13,14 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
 |---|---|---|
 | macOS debug | `swift build` | `.build/debug/PDFReader` |
 | macOS release + install | `./build.sh` | `build/PDF Gremza.app`, **copied over `/Applications/PDF Gremza.app`** |
-| macOS release zip | `ditto -c -k --keepParent "build/PDF Gremza.app" build/PDF-Reader.zip` | upload to the GitHub release |
+| macOS release zip | `./notarize.sh` (after `./build.sh`) | `build/PDF-Reader.zip`, notarized by Apple; upload to the GitHub release |
 | Windows dev (also on Mac) | `cd windows && npm start` | the menu bar title says "Electron" in dev; that is expected |
 | Windows installers | `cd windows && npm run dist` | `windows/dist/PDF-Reader-{Setup,Portable}-<ver>-x64.exe` (builds fine on a Mac) |
 | Electron as a Mac app (testing only) | `cd windows && npm run dist:mac` | `windows/dist/mac-arm64/PDF Gremza.app`, ad-hoc signed |
 
 - macOS 14+ and Swift tools 5.10 (Swift 5 language mode).
 - Icons: the logo is `Resources/AppIcon.svg`; `swift Tools/make_icon.swift` makes `Resources/AppIcon.icns` / `.png` (on the macOS icon grid), `windows/src/icon.png` and `docs/icon.png` from it.
+- macOS signing: `build.sh` signs with **"Developer ID Application: marsel preci (NH46K275BX)"** (picked by hash, hardened runtime), and `notarize.sh` notarizes with the `gremza-notary` keychain profile (Apple ID with an app-specific password). The updater only checks bundle id and version, so ad-hoc 1.4 updates to signed builds fine.
 - The owner's keychain has **two identical "Apple Development" certificates**, so electron-builder signing with an identity fails as "ambiguous". The `mac` build config uses `identity: "-"` (ad-hoc) and `hardenedRuntime: false` for that reason.
 - Version numbers live in `Resources/Info.plist` (`CFBundleShortVersionString`, `CFBundleVersion`) and `windows/package.json` (`version`). Keep both in step.
 - Releases: GitHub `Gremza/pdf-reader-free`, published with `gh release create`. See the `release` skill. **The update check depends on the asset names** (`PDF-Reader.zip`, `PDF-Reader-{Setup,Portable}-<ver>-x64.exe`) and on the tag (`v1.3`) matching the app versions. The app was renamed from "PDF Reader" to "PDF Gremza" after 1.3; the asset names keep the old name so that installed 1.3 apps still find their update. The macOS update recognizes the app by bundle id, not by name.

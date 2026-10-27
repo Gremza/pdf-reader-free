@@ -12,8 +12,9 @@ Publishing is outward-facing: only do it when the owner asked for it.
    - `plutil -replace CFBundleShortVersionString -string X.Y Resources/Info.plist`
    - `plutil -replace CFBundleVersion -string <n+1> Resources/Info.plist`
    - `"version": "X.Y.0"` in `windows/package.json`
-3. **macOS**: `./build.sh` (also installs to /Applications), then
-   `rm -f build/PDF-Reader.zip && ditto -c -k --keepParent "build/PDF Gremza.app" build/PDF-Reader.zip`
+3. **macOS**: `./build.sh` (signs with the Developer ID, also installs to /Applications), then `./notarize.sh`
+   → `build/PDF-Reader.zip` with the notarized, stapled app. It must end with `source=Notarized Developer ID`;
+   if `build.sh` printed "Developer ID not found", stop: an ad-hoc build must not be released.
 4. **Windows**: `cd windows && rm -rf dist/*.exe dist/*.blockmap && npm run dist`
    → `dist/PDF-Reader-Setup-X.Y.0-x64.exe`, `dist/PDF-Reader-Portable-X.Y.0-x64.exe`
 5. **Commit & push** to `main` (do not add `.vscode/`), with the attribution trailer from the session instructions.
@@ -24,6 +25,6 @@ Publishing is outward-facing: only do it when the owner asked for it.
 
 ## Release notes (English, like earlier releases)
 - What's new, then the **full feature list** (the owner wants features shown on the web page), then per-platform install notes:
-  - macOS: `PDF-Reader.zip`, move to /Applications; not notarized → right-click → Open → Open; macOS 14+, Apple Silicon.
+  - macOS: `PDF-Reader.zip`, move to /Applications; signed and notarized by Apple, so it opens normally; macOS 14+, Apple Silicon.
   - Windows: Setup (adds *Open with*) or Portable; not signed → SmartScreen: More info → Run anyway.
 Finally, give the owner the release URL.
