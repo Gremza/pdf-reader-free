@@ -71,7 +71,7 @@ In Full Screen Mode: `→` `↓` `Space` `Page Down` `Enter` or a click for the 
 
 Grab `PDF-Reader.zip` from the [latest release](../../releases/latest), unzip it and move **PDF Gremza.app** to `/Applications`.
 
-The app is not notarized by Apple, so the first time macOS will block it. Right-click the app → **Open** → **Open** (or allow it in *System Settings → Privacy & Security*). After that it opens normally.
+The app is signed and notarized by Apple, so it opens normally (the first time macOS only asks to confirm opening an app downloaded from the internet).
 
 ### Windows
 
