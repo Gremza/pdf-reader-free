@@ -32,6 +32,10 @@ final class TabsModel: ObservableObject {
 
     var selected: DocumentTab? { tabs.first { $0.id == selectedID } }
 
+    init() {
+        installPageKeys()
+    }
+
     // MARK: Opening
 
     func open(_ urls: [URL]) {
@@ -104,6 +108,13 @@ final class TabsModel: ObservableObject {
         }
     }
 
+    /// Dragging a tab onto another one puts it in that tab's place.
+    func moveTab(_ id: DocumentTab.ID, to target: DocumentTab.ID) {
+        guard id != target, let from = tabs.firstIndex(where: { $0.id == id }),
+              let to = tabs.firstIndex(where: { $0.id == target }) else { return }
+        tabs.insert(tabs.remove(at: from), at: to)
+    }
+
     func selectNext() { selectOffset(1) }
     func selectPrevious() { selectOffset(-1) }
 
@@ -131,6 +142,28 @@ final class TabsModel: ObservableObject {
         alert.addButton(withTitle: "Close Without Saving")
         discardConfirmed = alert.runModal() == .alertSecondButtonReturn
         return discardConfirmed
+    }
+
+    // MARK: Page Down / Page Up
+
+    /// Presentation remotes send Page Down / Page Up, so these keys turn pages outside
+    /// Full Screen Mode too, even while the page or search field has the keyboard.
+    private func installPageKeys() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let handled = MainActor.assumeIsolated { self?.handlePageKey(event) ?? false }
+            return handled ? nil : event
+        }
+    }
+
+    private func handlePageKey(_ event: NSEvent) -> Bool {
+        guard !isPresenting, event.window === window, let model = selected?.model,
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { return false }
+        switch event.specialKey {
+        case .pageDown?: model.nextPage()
+        case .pageUp?: model.previousPage()
+        default: return false
+        }
+        return true
     }
 
     // MARK: Full Screen Mode

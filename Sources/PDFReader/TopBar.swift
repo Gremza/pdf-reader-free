@@ -114,6 +114,9 @@ private struct TabItem: View {
     let isSelected: Bool
     let width: CGFloat
     @State private var isHovering = false
+    @State private var isDropTarget = false
+
+    private static let dragPrefix = "pdfreader-tab:"
 
     var body: some View {
         HStack(spacing: 6) {
@@ -146,9 +149,25 @@ private struct TabItem: View {
             RoundedRectangle(cornerRadius: 7)
                 .fill(Color.primary.opacity(isSelected ? 0.12 : isHovering ? 0.06 : 0))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+                .opacity(isDropTarget ? 1 : 0)
+        )
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture { tabs.selectedID = tab.id }
+        // Drag a tab left or right to change the order
+        .draggable(Self.dragPrefix + tab.id.uuidString) {
+            Text(tab.title).font(.system(size: 12)).padding(6)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            isDropTarget = false
+            guard let item = items.first, item.hasPrefix(Self.dragPrefix),
+                  let id = UUID(uuidString: String(item.dropFirst(Self.dragPrefix.count))) else { return false }
+            tabs.moveTab(id, to: tab.id)
+            return true
+        } isTargeted: { isDropTarget = $0 }
         .help(tab.url.path)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tab.title)

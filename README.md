@@ -17,7 +17,7 @@
 
 ## Features
 
-- **Tabs in the top bar** — open many PDFs side by side; tabs that don't fit go into a `»` overflow menu
+- **Tabs in the top bar** — open many PDFs side by side, drag a tab left or right to change the order; tabs that don't fit go into a `»` overflow menu
 - **Page thumbnails** sidebar — drag to reorder pages, right-click for page actions, `Delete` removes a page
 - **Zoom**: zoom in/out, fit width, fit whole page, actual size (100%)
 - **Layouts**: single page, continuous, two pages, two pages continuous
@@ -46,7 +46,7 @@ The same as in Adobe Acrobat Reader.
 | Open PDF(s) | `⌘O` | `Ctrl+O` |
 | Close tab | `⌘W` | `Ctrl+W` |
 | Next / previous tab | `⌘⇧]` / `⌘⇧[` | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
-| Next / previous page | `→` / `←` | `→` / `←` (or `Ctrl+Page Down` / `Ctrl+Page Up`) |
+| Next / previous page | `→` / `←` (or `Page Down` / `Page Up`, e.g. from a presentation remote) | `→` / `←` (or `Page Down` / `Page Up`, `Ctrl+Page Down` / `Ctrl+Page Up`) |
 | First / last page | `Home` / `End` | `Home` / `End` |
 | Go to page | `⌘⇧N` | `Ctrl+Shift+N` |
 | Zoom in / out | `⌘=` / `⌘−` | `Ctrl+=` / `Ctrl+−` (or `Ctrl` + mouse wheel) |

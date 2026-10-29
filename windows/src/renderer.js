@@ -871,7 +871,42 @@ function tabElement(tab, width) {
   // Middle click closes, like in browsers
   item.addEventListener("auxclick", (event) => { if (event.button === 1) close(tab); });
   item.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") select(tab); });
+  addTabDrag(item, tab);
   return item;
+}
+
+let draggedTab = null;
+
+/** Drag a tab left or right to change the order; dropped on another tab, it takes that tab's place. */
+function addTabDrag(item, tab) {
+  item.draggable = true;
+  item.addEventListener("dragstart", (event) => {
+    draggedTab = tab;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", tab.name);
+  });
+  item.addEventListener("dragend", () => {
+    draggedTab = null;
+  });
+  item.addEventListener("dragover", (event) => {
+    if (!draggedTab) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    item.classList.toggle("drop-target", draggedTab !== tab);
+  });
+  item.addEventListener("dragleave", () => item.classList.remove("drop-target"));
+  item.addEventListener("drop", (event) => {
+    item.classList.remove("drop-target");
+    if (!draggedTab) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const from = state.tabs.indexOf(draggedTab);
+    const to = state.tabs.indexOf(tab);
+    draggedTab = null;
+    if (from < 0 || to < 0 || from === to) return;
+    state.tabs.splice(to, 0, ...state.tabs.splice(from, 1));
+    renderTabs();
+  });
 }
 
 const measureContext = document.createElement("canvas").getContext("2d");
@@ -1245,6 +1280,9 @@ const shortcuts = {
   "ArrowRight": "nextPage",
   "Ctrl+PageUp": "previousPage",
   "Ctrl+PageDown": "nextPage",
+  // Presentation remotes send Page Down / Page Up
+  "PageUp": "previousPage",
+  "PageDown": "nextPage",
   "Home": "firstPage",
   "End": "lastPage",
   "Ctrl+Shift+n": "goToPage",
