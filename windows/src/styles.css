@@ -105,7 +105,6 @@ body.darwin.fullscreen #topbar { padding-left: 6px; }
   background: transparent;
 }
 
-.bar-button.wide { width: 40px; }
 .bar-button svg { width: 18px; height: 18px; }
 .bar-button:hover:not(:disabled) { background: var(--hover); }
 .bar-button:active:not(:disabled) { background: var(--pressed); }
@@ -285,13 +284,9 @@ body.darwin.fullscreen #topbar { padding-left: 6px; }
 }
 
 .menu-item:hover { background: var(--hover); }
-.menu-item .check { width: 14px; flex: none; text-align: center; color: var(--accent); }
-.menu-item[aria-checked="true"] .check::before { content: "✓"; }
 .menu-item .icon { display: grid; place-items: center; width: 18px; flex: none; }
 .menu-item .icon svg { width: 16px; height: 16px; }
 .menu-item .label { overflow: hidden; text-overflow: ellipsis; }
-.menu-item .shortcut { margin-left: auto; padding-left: 24px; color: var(--text-secondary); font-size: 12px; }
-.menu-separator { height: 1px; margin: 4px 2px; background: var(--divider); }
 
 /* MARK: Documents */
 
@@ -379,6 +374,20 @@ body.hide-cursor, body.hide-cursor * { cursor: none !important; }
   padding: 0;
 }
 .document.presenting .viewer-container .pdfViewer .page { box-shadow: none; margin: 0 auto; }
+
+/* Fade Between Pages: a copy of the old pages over the viewer, fading out */
+.page-fade {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--content-bg);
+  pointer-events: none;
+  transition: opacity 300ms ease;
+}
+.page-fade.fading { opacity: 0; }
+.page-fade canvas { position: absolute; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+.document.presenting .page-fade { background: #000000; }
+.document.presenting .page-fade canvas { box-shadow: none; }
 
 /* Reordering pages: a line shows where the dragged page will go */
 .thumb { position: relative; }

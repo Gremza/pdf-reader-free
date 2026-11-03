@@ -233,44 +233,10 @@ private struct DocumentControls: View {
             .help("Fit Width (⌘2)")
 
             Button(action: model.fitPage) {
-                Label("Fit Page", systemImage: "arrow.up.and.down.square")
+                Label("Fit Page", systemImage: "doc.viewfinder")
             }
             .symbolVariant(model.fitMode == .page ? .fill : .none)
             .help("Fit Page (⌘0)")
-
-            Button(action: model.actualSize) {
-                Label("Actual Size", systemImage: "1.magnifyingglass")
-            }
-            .help("Actual Size 100% (⌘1)")
-
-            Menu {
-                Picker("Layout", selection: $model.layout) {
-                    ForEach(PageLayout.allCases) { layout in
-                        Label(layout.title, systemImage: layout.systemImage).tag(layout)
-                    }
-                }
-                .pickerStyle(.inline)
-
-                Divider()
-
-                Button {
-                    model.rotate(by: -90)
-                } label: {
-                    Label("Rotate Left", systemImage: "rotate.left")
-                }
-
-                Button {
-                    model.rotate(by: 90)
-                } label: {
-                    Label("Rotate Right", systemImage: "rotate.right")
-                }
-            } label: {
-                Image(systemName: model.layout.systemImage)
-            }
-            .menuStyle(.borderlessButton)
-            .frame(width: 40)
-            .help("Layout and rotation")
-            .accessibilityLabel("Layout")
 
             Menu {
                 DocumentMenu(model: model)
@@ -280,15 +246,8 @@ private struct DocumentControls: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .frame(width: 32)
-            .disabled(!model.canEdit)
-            .help("Pages, saving and export")
+            .help("Layout, pages, saving and export")
             .accessibilityLabel("Document")
-
-            Button(action: model.exportJPEG) {
-                Label("Export as JPG", systemImage: "photo.on.rectangle")
-            }
-            .disabled(model.exportProgress != nil)
-            .help("Export every page as a JPG image (⌘E)")
 
             Button(action: tabs.startPresentation) {
                 Label("Full Screen Mode", systemImage: "arrow.up.left.and.arrow.down.right")
@@ -316,34 +275,59 @@ private struct DocumentControls: View {
     }
 }
 
-/// Page edits for the current page, saving and export.
+/// Saving, layout and rotation, edits of the current page, and export.
 private struct DocumentMenu: View {
     @ObservedObject var model: PDFViewModel
 
     var body: some View {
         let n = model.currentPage
-        Button("Save") { model.save() }
-            .disabled(!model.isDirty)
-        Button("Save As…") { model.saveAs() }
-        Button("Undo", action: model.undo)
-            .disabled(!model.canUndo)
-        Divider()
-        Button("Insert Blank Page After Page \(n)") { model.insertBlankPage(after: n) }
-        Button("Insert Pages from PDF After Page \(n)…") {
-            model.insertPDFs(after: n, message: "Choose the PDFs to insert")
+        Group {
+            Button("Save") { model.save() }
+                .disabled(!model.isDirty)
+            Button("Save As…") { model.saveAs() }
+            Button("Undo", action: model.undo)
+                .disabled(!model.canUndo)
         }
-        Button("Merge PDFs at End…", action: model.mergePDFs)
-        Button("Delete Page \(n)") { model.deletePage(n) }
-            .disabled(model.pageCount <= 1)
-        Divider()
-        Button("Rotate Page \(n) Left") { model.rotatePage(n, by: -90) }
-        Button("Rotate Page \(n) Right") { model.rotatePage(n, by: 90) }
-        Divider()
-        Button("Extract Pages to New PDF…") { model.extractPagesPrompt() }
-        Button("Split into Single Pages…", action: model.splitPages)
-        Divider()
-        Button("Export to Word…", action: model.exportWord)
-        Button("Export as JPG…", action: model.exportJPEG)
+        .disabled(!model.canEdit)
+        // The layout only changes the view, so it stays available during an export
+        Picker("Layout", selection: $model.layout) {
+            ForEach(PageLayout.allCases) { layout in
+                Label(layout.title, systemImage: layout.systemImage).tag(layout)
+            }
+        }
+        .pickerStyle(.inline)
+        FadeToggle()
+        Group {
+            Button {
+                model.rotate(by: -90)
+            } label: {
+                Label("Rotate Left", systemImage: "rotate.left")
+            }
+            Button {
+                model.rotate(by: 90)
+            } label: {
+                Label("Rotate Right", systemImage: "rotate.right")
+            }
+            Divider()
+            Button("Insert Blank Page After Page \(n)") { model.insertBlankPage(after: n) }
+            Button("Insert Pages from PDF After Page \(n)…") {
+                model.insertPDFs(after: n, message: "Choose the PDFs to insert")
+            }
+            Button("Merge PDFs at End…", action: model.mergePDFs)
+            Button("Delete Page \(n)") { model.deletePage(n) }
+                .disabled(model.pageCount <= 1)
+            Divider()
+            Button("Rotate Page \(n) Left") { model.rotatePage(n, by: -90) }
+            Button("Rotate Page \(n) Right") { model.rotatePage(n, by: 90) }
+            Divider()
+            Button("Extract Pages to New PDF…") { model.extractPagesPrompt() }
+            Button("Split into Single Pages…", action: model.splitPages)
+            Button("Reduce File Size…", action: model.reduceFileSize)
+            Divider()
+            Button("Export to Word…", action: model.exportWord)
+            Button("Export as JPG…", action: model.exportJPEG)
+        }
+        .disabled(!model.canEdit)
     }
 }
 

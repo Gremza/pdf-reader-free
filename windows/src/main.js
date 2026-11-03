@@ -265,6 +265,33 @@ ipcMain.handle("export-docx", async (_event, defaultName, document) => {
   return file;
 });
 
+/** "Reduce File Size": the index of the chosen quality, or null when cancelled. Medium is the default, like on macOS. */
+ipcMain.handle("ask-reduced-quality", async (_event, titles) => {
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    message: "Reduce File Size",
+    detail: "Choose the quality of the images in the smaller copy. Lower quality makes a smaller file. The original PDF stays unchanged.",
+    buttons: [...titles, "Cancel"],
+    defaultId: 1,
+    cancelId: titles.length,
+  });
+  return response < titles.length ? response : null;
+});
+
+/** Offers to open the reduced copy, which was just saved through "save-as". */
+ipcMain.on("show-reduced", async (_event, file, detail) => {
+  if (!writablePaths.has(file)) return;
+  const { response } = await dialog.showMessageBox(win, {
+    type: "info",
+    message: "The smaller PDF is saved",
+    detail,
+    buttons: ["Open", "OK"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response === 0) openPaths([file]);
+});
+
 /** PDFs to insert into the current document. */
 ipcMain.handle("pick-pdfs", async (_event, title) => {
   const result = await dialog.showOpenDialog(win, {
@@ -391,6 +418,7 @@ function updateAppMenu() {
         separator,
         item("Extract Pages to New PDF…", "extractPages", { enabled: edit }),
         item("Split into Single Pages…", "splitPages", { enabled: edit }),
+        item("Reduce File Size…", "reduceFileSize", { enabled: edit }),
         separator,
         item("Export to Word…", "exportWord", { enabled: edit }),
         item("Export as JPG…", "exportJPG", { accelerator: "CmdOrCtrl+E", enabled: edit }),
@@ -435,6 +463,7 @@ function updateAppMenu() {
         item("First Page", "firstPage", { accelerator: "Home", ...plainKey, enabled: doc && page > 1 }),
         item("Last Page", "lastPage", { accelerator: "End", ...plainKey, enabled: doc && page < s.pageCount }),
         item("Go to Page…", "goToPage", { accelerator: "CmdOrCtrl+Shift+N", enabled: doc && !s.presenting }),
+        item("Fade Between Pages", "toggleFadeBetweenPages", { type: "checkbox", checked: s.fadeBetweenPages !== false, enabled: doc }),
         separator,
         item("Full Screen Mode", "fullScreen", { type: "checkbox", checked: !!s.presenting, accelerator: "CmdOrCtrl+L", enabled: doc }),
       ],

@@ -41,17 +41,18 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
 - `TabsModel.swift`: the open tabs (`DocumentTab` holds a `PDFViewModel`), `showThumbnails`, the close-tab prompt (Save / Don't Save / Cancel), and `confirmDiscardChanges()` for quitting or closing the window.
   - **Full Screen Mode** (`isPresenting`, ⌘L): hides the top bar and thumbnails, puts the window into full screen (and back, unless it already was), and turns pages with keys and clicks through a local event monitor; `Esc` or leaving full screen ends it. The page itself is set up by `PDFViewModel.setPresenting` (single page, fitted, black, no page breaks or scroll bars; layout and zoom restored afterwards).
 - `PDFViewModel.swift`: one per tab. It owns the `PDFView` and handles:
-  - Navigation, zoom, fit modes, layouts and search.
+  - Navigation, zoom, fit modes, layouts and search. Page turns go through `turnPage`, which adds a `CATransition` fade to the PDFView's layer when "Fade Between Pages" is on (`fadeKey` in UserDefaults, on by default, toggled by `FadeToggle`); `showPage` moves without fading, e.g. after an edit.
   - **Edits:** every page operation goes through `applyEdit(pageAfter:_:)`. It snapshots `dataRepresentation()` onto `history` for undo (max 30) and gives the edit a new `version`. `isDirty` means `version != savedVersion`, and `documentChanged()` bumps `revision`, which redraws the thumbnails.
   - **Rotation:** "rotate all pages" (View menu) is a saved edit too, not just a view rotation.
   - **Protected PDFs:** encrypted, locked or restricted PDFs are refused by `ensureEditable()`.
   - **Exports** (`exportToFolder` for JPG and split, `exportWord`) read a **separate copy** of the document off the main thread through `ExportSource`: the saved file when the tab is clean, the current data when it is dirty. Edits are blocked while `exportProgress != nil` (`canEdit`).
   - Saving writes atomically. `saveAs` changes `url` and refreshes `TabsModel.shared` so the tab title updates.
   - Page numbers in the API are 1-based, like the UI.
+  - **Reduce File Size** (`reduceFileSize`): the system Quartz filter "Reduce File Size" with our own quality presets, applied through the `QuartzFilter` write option of `dataRepresentation(options:)` (undocumented; Preview uses it). It recompresses images by their drawn resolution and keeps links, outline and text. The copy is only offered when it is smaller.
 - `WordExport.swift`: PDF text to paragraphs to `.docx`, ported from `windows/src/word.js` and `docx.js`. Lines come from `PDFSelection.selectionsByLine()`, and paragraphs are joined using the same heuristics as the JS version. It includes its own stored zip writer and CRC32.
 - `ThumbnailSidebar.swift`: SwiftUI thumbnails that render lazily and re-render on `revision`. Click goes to the page, right-click opens the page menu, Delete removes the page. Dragging reorders pages, using a drag string with the `pdfreader-page:` prefix, plus a drop zone after the last page.
 - `UpdateChecker.swift`: checks the latest GitHub release at launch and daily, downloads `PDF-Reader.zip`, checks the bundle id and version, and swaps the bundle in place (`replaceItemAt`); "Restart Now" reopens the app after it quits. Settings (`checkForUpdates`, `installUpdatesAutomatically`) are in `UserDefaults`; the menu items are in the app menu.
-- `TopBar.swift`: the tab strip with a `»` overflow and the document controls. The "Document" menu button (`DocumentMenu`) holds the page edits, save and export. Keyboard shortcuts are on the **menu items**, not on the toolbar buttons; menu items focus the search and page fields through `PDFViewModel.focusRequest`. Unsaved tabs show `● ` before the title.
+- `TopBar.swift`: the tab strip with a `»` overflow and the document controls. The "Document" menu button (`DocumentMenu`) holds save, layout and rotation, the page edits and export; there are no separate Layout, Actual Size or JPG buttons. Keyboard shortcuts are on the **menu items**, not on the toolbar buttons; menu items focus the search and page fields through `PDFViewModel.focusRequest`. Unsaved tabs show `● ` before the title.
 - `WindowChrome.swift`: hidden title bar and traffic-light positioning. The close button's target and action are re-pointed to ask about unsaved changes first. ⌘W with no tabs calls `performClose`, which goes through the same check.
 
 ## Windows architecture (`windows/src/`)
@@ -65,9 +66,11 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
   - tabs, pdf.js viewer and thumbnails (drag to reorder)
   - `actions` (every command, used by buttons, shortcuts and menu actions); `syncMenu()` sends enabled/checked state to the main process
   - edits through `applyEdit`, with byte snapshots for undo
+  - Fade Between Pages: `turnPage` copies the visible page canvases onto a `.page-fade` layer and fades it out once the new page is drawn; the setting is in `localStorage`
   - Full Screen Mode: `startPresentation` / `endPresentation`, `tab.setPresenting`, `presentationKeys`; the main process enters and leaves full screen (`set-presenting`)
 - `updater.js`: the same update check in the main process. The installer build runs the downloaded setup with `--updated /S` when the app quits; the portable build swaps its own `.exe`. Settings are in `settings.json` under `userData`; the renderer shows them under the **Updates** button.
 - `editing.js`: pdf-lib page operations and `parsePageRanges`.
+- `reduce.js`: Reduce File Size. It decodes 8-bit gray/RGB images (JPEG, or Flate with PNG predictors) through `createImageBitmap`, scales them down to the dpi for a full page and stores them as JPEG with an `OffscreenCanvas`, only when that is smaller. CMYK, indexed, JBIG2 and JPEG 2000 images stay as they are. The presets (`REDUCED_QUALITIES`) match the macOS ones.
 - `word.js` and `docx.js`: the Word export.
 
 ## Rules
@@ -75,7 +78,7 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
 - **Feature parity:** a new feature goes into both apps, with the same English wording, menu placement and shortcut (⌘ on Mac, Ctrl on Windows). Use the `add-feature` skill, and the `parity-checker` agent to find gaps.
 - Every toolbar or icon action must also be in the menu bar on macOS: File, Edit, View, Pages, Window.
 - Never modify the user's files except on an explicit save. Exports always create new files or folders: "name", then "name 2", and so on.
-- Keep the macOS app dependency-free. Use only system frameworks (PDFKit, AppKit, SwiftUI, UniformTypeIdentifiers).
+- Keep the macOS app dependency-free. Use only system frameworks (PDFKit, Quartz, AppKit, SwiftUI, UniformTypeIdentifiers).
 - Match the surrounding style: short doc comments on the "why", `// MARK:` sections, no dead code.
 - Before publishing, check that no debug leftovers remain (e.g. `window.__state`).
 

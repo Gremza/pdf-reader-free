@@ -26,6 +26,8 @@ struct DocumentCommands: Commands {
                     .disabled(!model.canEdit)
                 Button("Split into Single Pages…", action: model.splitPages)
                     .disabled(!model.canEdit)
+                Button("Reduce File Size…", action: model.reduceFileSize)
+                    .disabled(!model.canEdit)
                 Divider()
                 Button("Export to Word…", action: model.exportWord)
                     .disabled(!model.canEdit)
@@ -127,6 +129,7 @@ struct DocumentCommands: Commands {
                 Button("Go to Page…") { model.focusRequest = .page }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                     .disabled(model.isPresenting)
+                FadeToggle()
 
                 Divider()
 
@@ -134,6 +137,15 @@ struct DocumentCommands: Commands {
                     .keyboardShortcut("l")
             }
         }
+    }
+}
+
+/// "Fade Between Pages", in the View menu and the Document button; a setting for every tab.
+struct FadeToggle: View {
+    @AppStorage(PDFViewModel.fadeKey) private var fade = true
+
+    var body: some View {
+        Toggle("Fade Between Pages", isOn: $fade)
     }
 }
 

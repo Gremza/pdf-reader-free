@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("host", {
   saveFile: (path, data) => ipcRenderer.invoke("save-file", path, data),
   saveAs: (defaultName, data, title) => ipcRenderer.invoke("save-as", defaultName, data, title),
   exportDocx: (defaultName, document) => ipcRenderer.invoke("export-docx", defaultName, document),
+  askReducedQuality: (titles) => ipcRenderer.invoke("ask-reduced-quality", titles),
+  showReduced: (path, detail) => ipcRenderer.send("show-reduced", path, detail),
   pickPDFs: (title) => ipcRenderer.invoke("pick-pdfs", title),
   confirmCloseTab: (name) => ipcRenderer.invoke("confirm-close-tab", name),
   showError: (message, detail) => ipcRenderer.send("show-error", message, detail),

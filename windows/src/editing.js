@@ -4,7 +4,8 @@ import { EncryptedPDFError, PDFDocument, degrees } from "../node_modules/pdf-lib
 
 export class ProtectedPDFError extends Error {}
 
-async function load(bytes) {
+/** Opens the PDF with pdf-lib; protected PDFs throw ProtectedPDFError. */
+export async function load(bytes) {
   try {
     return await PDFDocument.load(bytes, { updateMetadata: false });
   } catch (error) {

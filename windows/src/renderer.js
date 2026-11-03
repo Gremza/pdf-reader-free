@@ -1,10 +1,11 @@
 import * as pdfjsLib from "../node_modules/pdfjs-dist/build/pdf.mjs";
 import { ProtectedPDFError, assertEditable, extractPages, pageEdits, parsePageRanges } from "./editing.js";
 import { extractDocument, hasText } from "./word.js";
+import { REDUCED_QUALITIES, reduceImages } from "./reduce.js";
 
 // pdf_viewer.mjs reads the core library from this global
 globalThis.pdfjsLib = pdfjsLib;
-const { EventBus, LinkTarget, PDFFindController, PDFLinkService, PDFViewer, ScrollMode, SpreadMode } =
+const { EventBus, LinkTarget, PDFFindController, PDFLinkService, PDFViewer, RenderingStates, ScrollMode, SpreadMode } =
   await import("../node_modules/pdfjs-dist/web/pdf_viewer.mjs");
 
 const PDFJS = new URL("../node_modules/pdfjs-dist/", import.meta.url).href;
@@ -15,13 +16,6 @@ const LAYOUTS = {
   continuous: { scroll: ScrollMode.VERTICAL, spread: SpreadMode.NONE, title: "Continuous" },
   twoUp: { scroll: ScrollMode.PAGE, spread: SpreadMode.ODD, title: "Two Pages" },
   twoUpContinuous: { scroll: ScrollMode.VERTICAL, spread: SpreadMode.ODD, title: "Two Pages, Continuous" },
-};
-
-const LAYOUT_ICONS = {
-  single: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
-  continuous: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 12h6M9 16h6"/></svg>',
-  twoUp: '<svg viewBox="0 0 24 24"><path d="M12 6c-2-1.5-5-2-9-2v15c4 0 7 .5 9 2 2-1.5 5-2 9-2V4c-4 0-7 .5-9 2zM12 6v15"/></svg>',
-  twoUpContinuous: '<svg viewBox="0 0 24 24"><path d="M12 6c-2-1.5-5-2-9-2v15c4 0 7 .5 9 2 2-1.5 5-2 9-2V4c-4 0-7 .5-9 2zM12 6v15M5.5 9h4M5.5 12.5h4M14.5 9h4M14.5 12.5h4"/></svg>',
 };
 
 const DOC_ICON = '<svg class="doc-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>';
@@ -54,10 +48,6 @@ const el = {
   zoomIn: $("zoom-in"),
   fitWidth: $("fit-width"),
   fitPage: $("fit-page"),
-  actualSize: $("actual-size"),
-  layoutButton: $("layout-button"),
-  layoutMenu: $("layout-menu"),
-  exportJPG: $("export-jpg"),
   exportProgress: $("export-progress"),
   exportBar: $("export-bar"),
   exportLabel: $("export-label"),
@@ -80,6 +70,8 @@ const state = {
   tabs: [],
   selected: null,
   showThumbnails: true,
+  // View > Fade Between Pages, on by default
+  fadeBetweenPages: readSetting("fadeBetweenPages") !== "false",
   // Full Screen Mode: only the page of the selected tab, like a presentation
   presenting: false,
   // Update settings and whether a check is running, from the main process
@@ -87,6 +79,25 @@ const state = {
 };
 
 let nextID = 1;
+
+/** localStorage can be unavailable; the defaults apply then. */
+function readSetting(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // The setting lasts until the app quits
+  }
+}
+
+const FADE_MS = 300;
 
 // MARK: - Document tab
 
@@ -189,11 +200,65 @@ class DocumentTab {
   // MARK: Navigation
 
   goToPage(number) {
-    this.viewer.currentPageNumber = Math.min(Math.max(number, 1), this.pageCount);
+    this.turnPage(() => { this.viewer.currentPageNumber = Math.min(Math.max(number, 1), this.pageCount); });
   }
 
-  previousPage() { this.viewer.previousPage(); }
-  nextPage() { this.viewer.nextPage(); }
+  previousPage() { this.turnPage(() => this.viewer.previousPage()); }
+  nextPage() { this.turnPage(() => this.viewer.nextPage()); }
+
+  /** With "Fade Between Pages", a copy of the old pages fades out once the new page is drawn. */
+  turnPage(change) {
+    const before = this.viewer.currentPageNumber;
+    const overlay = state.fadeBetweenPages ? this.pageSnapshot() : null;
+    change();
+    const page = this.viewer.currentPageNumber;
+    if (!overlay || page === before) return;
+
+    this.fadeOverlay?.remove();
+    this.fadeOverlay = overlay;
+    this.container.after(overlay);
+    let started = false;
+    const start = () => {
+      if (started) return;
+      started = true;
+      this.eventBus.off("pagerendered", rendered);
+      // Reading the layout first makes the change of opacity a transition
+      void overlay.offsetWidth;
+      overlay.classList.add("fading");
+      setTimeout(() => overlay.remove(), FADE_MS + 100);
+    };
+    const rendered = ({ pageNumber }) => { if (pageNumber === page) start(); };
+    if (this.viewer.getPageView(page - 1)?.renderingState === RenderingStates.FINISHED) {
+      start();
+    } else {
+      this.eventBus.on("pagerendered", rendered);
+      // A slow page fades in while it is still being drawn
+      setTimeout(start, 200);
+    }
+  }
+
+  /** The visible page canvases, copied onto a layer over the viewer. */
+  pageSnapshot() {
+    const area = this.container.getBoundingClientRect();
+    const overlay = document.createElement("div");
+    overlay.className = "page-fade";
+    for (const canvas of this.container.querySelectorAll(".page canvas")) {
+      const rect = canvas.getBoundingClientRect();
+      if (!canvas.width || rect.bottom <= area.top || rect.top >= area.bottom) continue;
+      const copy = document.createElement("canvas");
+      copy.width = canvas.width;
+      copy.height = canvas.height;
+      copy.getContext("2d").drawImage(canvas, 0, 0);
+      Object.assign(copy.style, {
+        left: `${rect.left - area.left}px`,
+        top: `${rect.top - area.top}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`,
+      });
+      overlay.append(copy);
+    }
+    return overlay;
+  }
 
   // MARK: Full Screen Mode
 
@@ -403,6 +468,48 @@ class DocumentTab {
       name: `${number}.pdf`,
       data: await extractPages(this.bytes, [number - 1]),
     }));
+  }
+
+  /** Saves a copy of the PDF whose images are stored again as JPEG at a lower resolution and quality. */
+  async reduceFileSize() {
+    if (!this.canEdit) return;
+    try {
+      await assertEditable(this.bytes);
+    } catch (error) {
+      showEditError(error);
+      return;
+    }
+    const choice = await window.host.askReducedQuality(REDUCED_QUALITIES.map((quality) => `${quality.title} (${quality.dpi} dpi)`));
+    const quality = REDUCED_QUALITIES[choice];
+    if (!quality) return;
+
+    const original = this.bytes;
+    this.startProgress("Reducing");
+    let reduced;
+    try {
+      reduced = await reduceImages(original, quality, (n) => this.updateProgress(n));
+    } catch (error) {
+      if (error instanceof ProtectedPDFError) showEditError(error);
+      else window.host.showError("Reducing the file size failed", "The PDF can't be read.");
+      return;
+    } finally {
+      this.endProgress();
+    }
+    if (reduced.length >= original.length) {
+      window.host.showError("This PDF can't be made smaller",
+        "Its images are already compressed, or it has no images." + (quality.id === "low" ? "" : " Try a lower quality."));
+      return;
+    }
+    let path;
+    try {
+      path = await window.host.saveAs(`${this.baseName} (reduced).pdf`, reduced, "Save Reduced Size PDF");
+    } catch (error) {
+      window.host.showError("The PDF can't be saved", errorMessage(error));
+      return;
+    }
+    if (!path) return;
+    const percent = Math.round(100 - (reduced.length * 100) / original.length);
+    window.host.showReduced(path, `Reduced from ${formatSize(original.length)} to ${formatSize(reduced.length)} (${percent}% smaller).`);
   }
 
   /** Writes back to the file; returns false when it failed. */
@@ -771,6 +878,11 @@ function updateDirtyCount() {
   window.host.setDirtyCount(state.tabs.filter((tab) => tab.isDirty).length);
 }
 
+/** "173 KB", "16.1 MB": the same format as in the macOS app. */
+function formatSize(bytes) {
+  return bytes < 1_000_000 ? `${Math.max(1, Math.round(bytes / 1000))} KB` : `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
 function errorMessage(error) {
   return String(error?.message ?? error).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 }
@@ -936,16 +1048,11 @@ function updateControls() {
   el.nextPage.disabled = tab.currentPage >= tab.pageCount;
   el.fitWidth.classList.toggle("active", tab.fitMode === "width");
   el.fitPage.classList.toggle("active", tab.fitMode === "page");
-  el.layoutButton.innerHTML = LAYOUT_ICONS[tab.layout];
-  for (const item of el.layoutMenu.querySelectorAll("[data-layout]")) {
-    item.setAttribute("aria-checked", item.dataset.layout === tab.layout);
-  }
 }
 
 function updateExportProgress() {
   syncMenu();
   const progress = state.selected?.exportProgress;
-  el.exportJPG.disabled = !!progress;
   el.exportProgress.hidden = !progress;
   if (!progress) return;
   el.exportBar.max = Math.max(progress.total, 1);
@@ -978,6 +1085,7 @@ function syncMenu() {
     pageCount: tab?.pageCount,
     fitMode: tab?.fitMode,
     layout: tab?.layout,
+    fadeBetweenPages: state.fadeBetweenPages,
   };
   const json = JSON.stringify(menuState);
   if (json === lastMenuState) return;
@@ -993,7 +1101,6 @@ function toggleMenu(menu) {
 }
 
 function closeMenus() {
-  el.layoutMenu.hidden = true;
   el.overflowMenu.hidden = true;
 }
 
@@ -1001,14 +1108,12 @@ document.addEventListener("pointerdown", (event) => {
   if (!event.target.closest(".menu-anchor")) closeMenus();
 });
 
-for (const item of el.layoutMenu.querySelectorAll("[data-icon]")) {
-  item.innerHTML = LAYOUT_ICONS[item.dataset.icon];
-}
-
 /** Native menus for page editing; `run` maps item ids to actions. */
 async function popup(items, x, y, run) {
   const id = await window.host.popupMenu(items, x, y);
-  if (id) run[id]?.();
+  if (!id) return;
+  run[id]?.();
+  updateControls();
 }
 
 /** The "Document" button in the top bar. */
@@ -1023,6 +1128,13 @@ function showDocumentMenu() {
     { id: "saveAs", label: "Save As…", accelerator: "Ctrl+Shift+S", enabled },
     { id: "undo", label: "Undo", accelerator: "Ctrl+Z", enabled: enabled && tab.history.length > 0 },
     { type: "separator" },
+    // The layout only changes the view, so it stays available during an export
+    { label: "Layout", enabled: false },
+    ...Object.entries(LAYOUTS).map(([id, layout]) => ({ id, label: layout.title, type: "radio", checked: tab.layout === id })),
+    { id: "fade", label: "Fade Between Pages", type: "checkbox", checked: state.fadeBetweenPages },
+    { id: "rotateAllLeft", label: "Rotate Left", accelerator: "Ctrl+Shift+-", enabled },
+    { id: "rotateAllRight", label: "Rotate Right", accelerator: "Ctrl+Shift+=", enabled },
+    { type: "separator" },
     { id: "blank", label: `Insert Blank Page After Page ${n}`, enabled },
     { id: "insert", label: `Insert Pages from PDF After Page ${n}…`, accelerator: "Ctrl+Shift+I", enabled },
     { id: "merge", label: "Merge PDFs at End…", enabled },
@@ -1033,6 +1145,7 @@ function showDocumentMenu() {
     { type: "separator" },
     { id: "extract", label: "Extract Pages to New PDF…", enabled },
     { id: "split", label: "Split into Single Pages…", enabled },
+    { id: "reduce", label: "Reduce File Size…", enabled },
     { type: "separator" },
     { id: "word", label: "Export to Word…", enabled },
     { id: "jpg", label: "Export as JPG…", accelerator: "Ctrl+E", enabled },
@@ -1040,6 +1153,10 @@ function showDocumentMenu() {
     save: () => tab.save(),
     saveAs: () => tab.saveAs(),
     undo: () => tab.undo(),
+    ...Object.fromEntries(Object.keys(LAYOUTS).map((id) => [id, () => tab.setLayout(id)])),
+    fade: actions.toggleFadeBetweenPages,
+    rotateAllLeft: () => tab.rotate(-90),
+    rotateAllRight: () => tab.rotate(90),
     blank: () => tab.insertBlankPage(n),
     insert: () => tab.insertPDFs(n, "Choose the PDFs to insert"),
     merge: () => tab.insertPDFs(tab.pageCount, "Choose the PDFs to merge"),
@@ -1048,6 +1165,7 @@ function showDocumentMenu() {
     rotateRight: () => tab.rotatePage(n, 90),
     extract: () => tab.extractPagesPrompt(),
     split: () => tab.splitPages(),
+    reduce: () => tab.reduceFileSize(),
     word: () => tab.exportWord(),
     jpg: () => tab.exportJPEG(),
   });
@@ -1192,6 +1310,11 @@ const actions = {
   }),
   findNext: withTab((tab) => tab.search(true, false)),
   findPrevious: withTab((tab) => tab.search(true, true)),
+  toggleFadeBetweenPages: () => {
+    state.fadeBetweenPages = !state.fadeBetweenPages;
+    writeSetting("fadeBetweenPages", String(state.fadeBetweenPages));
+    syncMenu();
+  },
   toggleThumbnails: () => {
     if (!state.selected || state.presenting) return;
     state.showThumbnails = !state.showThumbnails;
@@ -1207,6 +1330,7 @@ const actions = {
   rotatePageRight: withTab((tab) => tab.rotatePage(tab.currentPage, 90)),
   extractPages: withTab((tab) => tab.extractPagesPrompt()),
   splitPages: withTab((tab) => tab.splitPages()),
+  reduceFileSize: withTab((tab) => tab.reduceFileSize()),
   exportWord: withTab((tab) => tab.exportWord()),
   checkForUpdates: () => window.host.checkForUpdates(),
   toggleCheckForUpdates: () => window.host.setUpdateSetting("checkForUpdates", !state.updates.checkForUpdates),
@@ -1222,23 +1346,10 @@ el.zoomIn.addEventListener("click", actions.zoomIn);
 el.zoomOut.addEventListener("click", actions.zoomOut);
 el.fitWidth.addEventListener("click", actions.fitWidth);
 el.fitPage.addEventListener("click", actions.fitPage);
-el.actualSize.addEventListener("click", actions.actualSize);
-el.exportJPG.addEventListener("click", actions.exportJPG);
 el.documentButton.addEventListener("click", showDocumentMenu);
 el.fullscreen.addEventListener("click", actions.fullScreen);
 el.updatesButton.addEventListener("click", showUpdatesMenu);
-el.layoutButton.addEventListener("click", () => toggleMenu(el.layoutMenu));
 el.overflowButton.addEventListener("click", () => toggleMenu(el.overflowMenu));
-
-el.layoutMenu.addEventListener("click", (event) => {
-  const item = event.target.closest(".menu-item");
-  const tab = state.selected;
-  if (!item || !tab) return;
-  if (item.dataset.layout) tab.setLayout(item.dataset.layout);
-  if (item.dataset.rotate) tab.rotate(Number(item.dataset.rotate));
-  closeMenus();
-  updateControls();
-});
 
 el.pageField.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;

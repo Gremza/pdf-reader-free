@@ -1,5 +1,6 @@
 import SwiftUI
 import PDFKit
+import Quartz
 import UniformTypeIdentifiers
 
 enum FitMode {
@@ -11,7 +12,7 @@ enum BarField {
     case page, search
 }
 
-/// A running export, e.g. ("Exporting", 3, 10).
+/// A running export, e.g. ("Exporting", 3, 10); a total of 0 means the progress is unknown.
 struct ExportProgress {
     var label: String
     var done: Int
@@ -124,6 +125,8 @@ final class PDFViewModel: ObservableObject {
         pdfView.displayDirection = .vertical
         pdfView.backgroundColor = .windowBackgroundColor
         pdfView.postsFrameChangedNotifications = true
+        // Page turns fade through the view's layer
+        pdfView.wantsLayer = true
         pageCount = document.pageCount
 
         let center = NotificationCenter.default
@@ -149,16 +152,32 @@ final class PDFViewModel: ObservableObject {
 
     // MARK: Navigation
 
-    func goToPage(_ number: Int) {
+    /// The UserDefaults key of "Fade Between Pages", which is on by default.
+    static let fadeKey = "fadeBetweenPages"
+
+    func goToPage(_ number: Int) { turnPage { showPage(number) } }
+    func previousPage() { turnPage { pdfView.goToPreviousPage(nil) } }
+    func nextPage() { turnPage { pdfView.goToNextPage(nil) } }
+    func firstPage() { turnPage { pdfView.goToFirstPage(nil) } }
+    func lastPage() { turnPage { pdfView.goToLastPage(nil) } }
+
+    private func showPage(_ number: Int) {
         guard let doc = pdfView.document,
               let page = doc.page(at: min(max(number, 1), doc.pageCount) - 1) else { return }
         pdfView.go(to: page)
     }
 
-    func previousPage() { pdfView.goToPreviousPage(nil) }
-    func nextPage() { pdfView.goToNextPage(nil) }
-    func firstPage() { pdfView.goToFirstPage(nil) }
-    func lastPage() { pdfView.goToLastPage(nil) }
+    /// Core Animation cross-fades the whole view from the old page to the new one,
+    /// including pages that PDFKit is still drawing.
+    private func turnPage(_ change: () -> Void) {
+        if UserDefaults.standard.object(forKey: Self.fadeKey) as? Bool ?? true, let layer = pdfView.layer {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.3
+            layer.add(fade, forKey: "pageFade")
+        }
+        change()
+    }
 
     // MARK: Full Screen Mode
 
@@ -334,6 +353,14 @@ final class PDFViewModel: ObservableObject {
             case .data(let data): PDFDocument(data: data)
             }
         }
+
+        /// The size of the PDF as it would be saved now.
+        nonisolated var byteCount: Int {
+            switch self {
+            case .file(let url): (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            case .data(let data): data.count
+            }
+        }
     }
 
     private var thumbnailSnapshot: (revision: Int, source: ExportSource)?
@@ -497,7 +524,7 @@ final class PDFViewModel: ObservableObject {
         pageCount = doc.pageCount
         pdfView.layoutDocumentView()
         applyFit()
-        goToPage(page)
+        showPage(page)
         updateCurrentPage()
         revision += 1
         if !searchText.trimmingCharacters(in: .whitespaces).isEmpty { search() }
@@ -700,6 +727,123 @@ final class PDFViewModel: ObservableObject {
             else { return }
             NSWorkspace.shared.open(target)
         }
+    }
+
+    // MARK: Reduce File Size
+
+    /// The image quality of a reduced copy; the same presets as in the Windows app.
+    enum ReducedQuality: CaseIterable {
+        case high, medium, low
+
+        var title: String {
+            switch self {
+            case .high: "High Quality"
+            case .medium: "Medium Quality"
+            case .low: "Low Quality"
+            }
+        }
+
+        var dpi: Int {
+            switch self {
+            case .high: 200
+            case .medium: 144
+            case .low: 96
+            }
+        }
+
+        var jpegQuality: Double {
+            switch self {
+            case .high: 0.8
+            case .medium: 0.6
+            case .low: 0.4
+            }
+        }
+
+        /// The settings of the system's "Reduce File Size" Quartz filter, with this quality.
+        var filterProperties: [String: Any] {
+            [
+                "Name": "Reduce File Size",
+                "FilterType": 1,
+                "Domains": ["Applications": true],
+                "FilterData": ["ColorSettings": ["ImageSettings": [
+                    "Compression Quality": jpegQuality,
+                    "ImageCompression": "ImageJPEGCompress",
+                    "ImageScaleSettings": [
+                        "ImageResolution": dpi,
+                        "ImageScaleInterpolate": true,
+                        "ImageSizeMax": 0,
+                        "ImageSizeMin": 0,
+                    ],
+                ]]],
+            ]
+        }
+    }
+
+    /// Saves a copy of the PDF whose images are stored again as JPEG at a lower resolution and quality.
+    func reduceFileSize() {
+        guard canEdit, ensureEditable(), let quality = askReducedQuality(), let source = exportSource() else { return }
+        let originalSize = source.byteCount
+        exportProgress = ExportProgress(label: "Reducing", done: 0, total: 0)
+
+        Task { [weak self] in
+            let data = await Self.reducedData(of: source, quality: quality)
+            guard let self else { return }
+            exportProgress = nil
+            guard let data else {
+                showError("Reducing the file size failed", "The PDF can't be read.")
+                return
+            }
+            guard data.count < originalSize else {
+                showError("This PDF can't be made smaller",
+                          "Its images are already compressed, or it has no images." + (quality == .low ? "" : " Try a lower quality."))
+                return
+            }
+            guard let target = askSaveURL(name: "\(baseName) (reduced).pdf", type: .pdf, message: "Save Reduced Size PDF"),
+                  write(data, to: target)
+            else { return }
+            NSDocumentController.shared.noteNewRecentDocumentURL(target)
+            showReduced(from: originalSize, to: data.count, at: target)
+        }
+    }
+
+    private func askReducedQuality() -> ReducedQuality? {
+        let alert = NSAlert()
+        alert.messageText = "Reduce File Size"
+        alert.informativeText = "Choose the quality of the images in the smaller copy. " +
+            "Lower quality makes a smaller file. The original PDF stays unchanged."
+        for quality in ReducedQuality.allCases {
+            alert.addButton(withTitle: "\(quality.title) (\(quality.dpi) dpi)")
+        }
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        // Medium is the default, like in the Windows app
+        alert.buttons[0].keyEquivalent = ""
+        alert.buttons[1].keyEquivalent = "\r"
+        let index = alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        return ReducedQuality.allCases.indices.contains(index) ? ReducedQuality.allCases[index] : nil
+    }
+
+    /// The Quartz filter recompresses every image at the resolution it is drawn with; links,
+    /// outline and text stay as they are. "QuartzFilter" is the write option Preview uses for it.
+    nonisolated private static func reducedData(of source: ExportSource, quality: ReducedQuality) async -> Data? {
+        guard let doc = source.open(), let filter = QuartzFilter(properties: quality.filterProperties) else { return nil }
+        return doc.dataRepresentation(options: [PDFDocumentWriteOption(rawValue: "QuartzFilter"): filter])
+    }
+
+    private func showReduced(from original: Int, to reduced: Int, at target: URL) {
+        let alert = NSAlert()
+        alert.messageText = "The smaller PDF is saved"
+        let percent = Int((100 - Double(reduced) * 100 / Double(original)).rounded())
+        alert.informativeText = "Reduced from \(Self.formatSize(original)) to \(Self.formatSize(reduced)) (\(percent)% smaller)."
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "OK")
+        if alert.runModal() == .alertFirstButtonReturn { TabsModel.shared.open([target]) }
+    }
+
+    /// "173 KB", "16.1 MB": the same format as in the Windows app.
+    nonisolated static func formatSize(_ bytes: Int) -> String {
+        bytes < 1_000_000
+            ? "\(max(1, Int((Double(bytes) / 1000).rounded()))) KB"
+            : String(format: "%.1f MB", Double(bytes) / 1_000_000)
     }
 
     // MARK: Search

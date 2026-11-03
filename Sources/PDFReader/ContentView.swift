@@ -52,10 +52,17 @@ private struct ExportProgressBadge: View {
     var body: some View {
         if let progress = model.exportProgress, !model.isPresenting {
             HStack(spacing: 10) {
-                ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
-                    .frame(width: 120)
-                Text("\(progress.label) \(progress.done) / \(progress.total)…")
-                    .monospacedDigit()
+                if progress.total > 0 {
+                    ProgressView(value: Double(progress.done), total: Double(progress.total))
+                        .frame(width: 120)
+                    Text("\(progress.label) \(progress.done) / \(progress.total)…")
+                        .monospacedDigit()
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                        .frame(width: 120)
+                    Text("\(progress.label)…")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

@@ -21,12 +21,14 @@
 - **Page thumbnails** sidebar — drag to reorder pages, right-click for page actions, `Delete` removes a page
 - **Zoom**: zoom in/out, fit width, fit whole page, actual size (100%)
 - **Layouts**: single page, continuous, two pages, two pages continuous
+- **Fade Between Pages** — page turns cross-fade from one page to the next; on by default, turn it off in the View menu or the Document button
 - **Rotate** pages left / right
 - **Full Screen Mode** — only the page, on black, without bars or borders; turn pages like a presentation with the arrow keys, `Space`, `Page Up` / `Page Down` or a click (right-click goes back); `Esc` exits
 - **Search** text inside the document
 - **Edit pages**: delete, rotate, insert blank pages, insert pages from other PDFs, merge PDFs, with undo
 - **Save / Save As** — changes are only written when you save; unsaved tabs show `●` and ask before closing
 - **Extract pages** (e.g. `1-3, 5`) into a new PDF, or **split** every page into its own PDF
+- **Reduce File Size** — saves a smaller copy whose images are stored again as JPEG at high, medium or low quality (200, 144 or 96 dpi); the original stays unchanged
 - **Export to Word** (`.docx`) — the text of the PDF, with paragraphs, bold/italic and font sizes
 - **Export to JPG** — saves every page as an image (`1.jpg`, `2.jpg`, …) in a new folder named after the PDF
 - **Updates** — checks GitHub for a new version at launch and once a day; installs it automatically or asks first (*Check for Updates…*, *Check for Updates Automatically*, *Install Updates Automatically* in the app menu on macOS and the **Updates** button on Windows)
@@ -127,6 +129,8 @@ windows/src/
   preload.js           Bridge between the window and the main process
   index.html           Top bar, empty state
   renderer.js          Tabs, navigation, zoom, layouts, rotation, search, thumbnails
+  editing.js           Page edits with pdf-lib
+  reduce.js            Reduce File Size: images recompressed as JPEG
   styles.css           Light / dark theme
 ```
 
