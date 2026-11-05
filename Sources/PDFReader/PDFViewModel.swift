@@ -895,9 +895,18 @@ final class PDFViewModel: ObservableObject {
     nonisolated private static let ocrLanguages = ["tr-TR", "fr-FR", "de-DE", "en-US"]
     /// Scanned pages are read at 300 DPI, but never larger than this many pixels on a side.
     nonisolated private static let ocrMaxSide: CGFloat = 6000
-    /// Vision skips lines of small text on a whole page (a bank statement lost its card numbers),
-    /// but finds them in parts of it, so each page is read in this many overlapping bands.
-    nonisolated private static let ocrBands = 5
+    /// Vision skips small text on a whole page (a bank statement lost its card numbers and short words like "AL"),
+    /// but finds it in parts of the page, so each page is read in overlapping tiles: this many rows and columns,
+    /// then in rows across the whole width (for lines wider than a tile), then whole.
+    nonisolated private static let ocrRows = 5
+    nonisolated private static let ocrColumns = 2
+    /// Vision sometimes reads Latin capitals as the Cyrillic letters that look the same ("ОСТ" for "OCT"),
+    /// which search would never find; none of the languages it reads here are written in Cyrillic.
+    nonisolated private static let cyrillicLookalikes: [Character: Character] = [
+        "А": "A", "В": "B", "Е": "E", "Ё": "Ë", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
+        "У": "Y", "Х": "X", "а": "a", "е": "e", "ё": "ë", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i",
+        "ј": "j", "ѕ": "s",
+    ]
 
     /// The pages with recognized text, as a PDF whose pages replace those at `indexes` (0-based).
     private struct RecognizedPages: Sendable {
@@ -1033,8 +1042,9 @@ final class PDFViewModel: ObservableObject {
             request.regionOfInterest = region
             try handler.perform([request])
             return (request.results ?? []).compactMap { observation in
-                guard let text = observation.topCandidates(1).first?.string.trimmingCharacters(in: .whitespaces),
-                      !text.isEmpty else { return nil }
+                guard let found = observation.topCandidates(1).first?.string.trimmingCharacters(in: .whitespaces),
+                      !found.isEmpty else { return nil }
+                let text = cleaned(found)
                 // The box is relative to the region
                 let box = observation.boundingBox
                 let rect = CGRect(x: region.minX + box.minX * region.width, y: region.minY + box.minY * region.height,
@@ -1043,22 +1053,107 @@ final class PDFViewModel: ObservableObject {
             }
         }
 
-        // The bands overlap by half. Each keeps the lines whose middle is in its own share,
-        // so a line cut by the edge of one band comes whole from the next.
-        let step = 1 / CGFloat(ocrBands + 1)
+        // Tiles overlap their neighbours by half. Each keeps the lines whose middle is in its own share,
+        // so a line cut by the top or bottom of one tile comes whole from the next.
+        /// Tile `index` of `count` along one side (normalized): where it starts, its length and its own share.
+        func span(_ index: Int, of count: Int) -> (start: CGFloat, length: CGFloat, own: Range<CGFloat>) {
+            let step = 1 / CGFloat(count + 1)
+            let start = CGFloat(index) * step
+            let low = index == 0 ? -CGFloat.infinity : start + step / 2
+            let high = index == count - 1 ? CGFloat.infinity : start + 1.5 * step
+            return (start, 2 * step, low..<high)
+        }
         var lines: [RecognizedLine] = []
-        for band in 0..<ocrBands {
-            let region = CGRect(x: 0, y: CGFloat(band) * step, width: 1, height: 2 * step)
-            let low = band == 0 ? -CGFloat.infinity : region.minY + step / 2
-            let high = band == ocrBands - 1 ? CGFloat.infinity : region.maxY - step / 2
-            lines += try read(region).filter { low..<high ~= $0.rect.midY / CGFloat(height) }
+        /// Adds the lines that aren't already there.
+        func add(_ new: [RecognizedLine]) {
+            let found = lines
+            lines += new.filter { line in !found.contains { overlapsMostly($0.rect, line.rect) } }
         }
-        // Lines that no band found may still be found on the whole page
-        let found = lines
-        lines += try read(CGRect(x: 0, y: 0, width: 1, height: 1)).filter { line in
-            !found.contains { overlapsMostly($0.rect, line.rect) }
+        for row in 0..<ocrRows {
+            let y = span(row, of: ocrRows)
+            // Lines that reach the side of a tile inside the page may be cut there; their pieces are joined below
+            var cut: [LinePiece] = []
+            for column in 0..<ocrColumns {
+                let x = span(column, of: ocrColumns)
+                let left = x.start == 0 ? -CGFloat.infinity : (x.start + 0.01) * CGFloat(width)
+                let right = x.start + x.length >= 1 ? CGFloat.infinity : (x.start + x.length - 0.01) * CGFloat(width)
+                for line in try read(CGRect(x: x.start, y: y.start, width: x.length, height: y.length))
+                where y.own ~= line.rect.midY / CGFloat(height) {
+                    let piece = LinePiece(line: line, column: column, cutLeft: line.rect.minX <= left, cutRight: line.rect.maxX >= right)
+                    if piece.cutLeft || piece.cutRight {
+                        cut.append(piece)
+                    } else if x.own ~= line.rect.midX / CGFloat(width) {
+                        add([line])
+                    }
+                }
+            }
+            add(joined(cut))
         }
+        // Then the rows across the whole width, for lines wider than a tile, and finally the whole page
+        for row in 0..<ocrRows {
+            let y = span(row, of: ocrRows)
+            add(try read(CGRect(x: 0, y: y.start, width: 1, height: y.length)).filter { y.own ~= $0.rect.midY / CGFloat(height) })
+        }
+        add(try read(CGRect(x: 0, y: 0, width: 1, height: 1)))
         return (lines, toPixels)
+    }
+
+    /// The text Vision found, with Latin letters for Cyrillic ones that look the same, and without the letters
+    /// it sometimes adds to the end of a number ("3,000.00ł").
+    nonisolated private static func cleaned(_ text: String) -> String {
+        let latin = String(text.map { cyrillicLookalikes[$0] ?? $0 })
+        return latin.split(separator: " ", omittingEmptySubsequences: false).map { word in
+            let head = word.prefix(while: \.isASCII)
+            let tail = word.dropFirst(head.count)
+            return head.last?.isNumber == true && !tail.isEmpty && !tail.contains(where: \.isASCII) ? String(head) : String(word)
+        }.joined(separator: " ")
+    }
+
+    /// A line found in one tile, maybe cut by its sides.
+    private struct LinePiece {
+        let line: RecognizedLine
+        let column: Int
+        let cutLeft: Bool
+        let cutRight: Bool
+    }
+
+    /// Joins the pieces of lines cut by the sides of tiles in one row: a piece cut on its right is followed by
+    /// the piece of the next tile on the same line that repeats some of its text (the part both tiles see).
+    /// Pieces that can't be joined into a whole line are left out; the full-width rows read those lines.
+    nonisolated private static func joined(_ pieces: [LinePiece]) -> [RecognizedLine] {
+        var rest = pieces.sorted { $0.line.rect.minX < $1.line.rect.minX }
+        var lines: [RecognizedLine] = []
+        while !rest.isEmpty {
+            var piece = rest.removeFirst()
+            guard !piece.cutLeft else { continue }
+            var line = piece.line
+            while piece.cutRight, let index = rest.firstIndex(where: { next in
+                next.column == piece.column + 1 && next.cutLeft && line.rect.minY < next.line.rect.midY && next.line.rect.midY < line.rect.maxY
+            }) {
+                let next = rest.remove(at: index)
+                guard let text = overlapJoined(line.text, next.line.text) else { break }
+                line = RecognizedLine(text: text, rect: line.rect.union(next.line.rect))
+                piece = LinePiece(line: line, column: next.column, cutLeft: false, cutRight: next.cutRight)
+            }
+            if !piece.cutRight { lines.append(line) }
+        }
+        return lines
+    }
+
+    /// `left` and `right` joined where the end of one repeats the start of the other (at least 4 characters alike).
+    nonisolated private static func overlapJoined(_ left: String, _ right: String) -> String? {
+        let a = Array(left), b = Array(right)
+        // The longest run of characters both have: run[j] is the length of the run ending at a[i - 1] and b[j - 1]
+        var best = (length: 0, endA: 0, endB: 0)
+        var run = [Int](repeating: 0, count: b.count + 1)
+        for i in a.indices {
+            for j in b.indices.reversed() {
+                run[j + 1] = a[i] == b[j] ? run[j] + 1 : 0
+                if run[j + 1] > best.length { best = (run[j + 1], i + 1, j + 1) }
+            }
+        }
+        guard best.length >= 4 else { return nil }
+        return String(a[..<(best.endA - best.length)]) + String(b[(best.endB - best.length)...])
     }
 
     /// True when the two boxes share more than a fifth of the smaller one.
@@ -1068,6 +1163,7 @@ final class PDFViewModel: ObservableObject {
     }
 
     /// Each line is stretched over the width Vision found for it, so selections match the scan.
+    /// A space follows it, outside that width, so the text of two boxes side by side doesn't run together.
     nonisolated private static func drawInvisible(_ lines: [RecognizedLine], in context: CGContext) {
         context.setTextDrawingMode(.invisible)
         context.textMatrix = .identity
@@ -1076,8 +1172,8 @@ final class PDFViewModel: ObservableObject {
         for line in lines {
             let size = line.rect.height / (ascent + descent)
             let font = CTFontCreateCopyWithAttributes(base, size, nil, nil)
-            let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: line.text, attributes: [.font: font]))
-            let width = CTLineGetTypographicBounds(ctLine, nil, nil, nil)
+            let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: line.text + " ", attributes: [.font: font]))
+            let width = CTLineGetTypographicBounds(ctLine, nil, nil, nil) - CTLineGetTrailingWhitespaceWidth(ctLine)
             guard width > 0 else { continue }
             context.saveGState()
             context.translateBy(x: line.rect.minX, y: line.rect.minY + descent * size)
