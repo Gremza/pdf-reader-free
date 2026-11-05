@@ -66,7 +66,7 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
 
 - `main.js`:
   - window, file IO, dialogs, writable-path allow-list, export folders, the unsaved-changes prompt on close
-  - **the macOS app menu** (`updateAppMenu`, built from `menu-state` sent by the renderer; on Windows `Menu.setApplicationMenu(null)`)
+  - **the menu bar**: `menuTemplate()`, built from `menu-state` sent by the renderer. On macOS it is the app menu (`updateAppMenu`). On Windows there is no application menu (the title bar is hidden): the renderer draws `#menubar` (File, Edit, View, Pages, Window, Help; `Alt`+letter) as the window's top row beside the native caption buttons (`titleBarOverlay` height `MENU_BAR_HEIGHT`), and `show-menu-bar-menu` pops up the same submenu below the clicked button. Its keys are only shown; the renderer's `shortcuts` handle them. Windows has Exit in File and About / the update settings in Help
   - `app.setName("PDF Gremza")`
 - `preload.js`: the `window.host` bridge.
 - `renderer.js`:
@@ -87,7 +87,7 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
 ## Rules
 
 - **Feature parity:** a new feature goes into both apps, with the same English wording, menu placement and shortcut (⌘ on Mac, Ctrl on Windows). Use the `add-feature` skill, and the `parity-checker` agent to find gaps.
-- Every toolbar or icon action must also be in the menu bar on macOS: File, Edit, View, Pages, Window.
+- Every toolbar or icon action must also be in the menu bar: File, Edit, View, Pages, Window (the native one on macOS; the same `menuTemplate()` on Windows).
 - Never modify the user's files except on an explicit save. Exports always create new files or folders: "name", then "name 2", and so on.
 - Keep the macOS app dependency-free. Use only system frameworks (PDFKit, Quartz, AppKit, SwiftUI, UniformTypeIdentifiers, Vision).
 - Match the surrounding style: short doc comments on the "why", `// MARK:` sections, no dead code.

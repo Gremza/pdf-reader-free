@@ -1,5 +1,6 @@
 :root {
   --bar-height: 40px;
+  --menu-bar-height: 32px;
   --caption-width: 138px; /* Room for the native minimize/maximize/close buttons */
   --bar-bg: #f3f3f3;
   --content-bg: #e6e6e6;
@@ -71,6 +72,38 @@ svg {
   stroke-linejoin: round;
 }
 
+/* MARK: Menu bar (Windows) */
+
+#menubar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: var(--menu-bar-height);
+  flex: none;
+  padding: 0 calc(var(--caption-width) + 6px) 0 8px;
+  background: var(--bar-bg);
+  -webkit-app-region: drag;
+}
+
+/* macOS (development) uses the native menu bar */
+body.darwin #menubar { display: none; }
+body.fullscreen #menubar { padding-right: 8px; }
+
+.menubar-icon { width: 16px; height: 16px; margin-right: 6px; }
+
+.menubar-item {
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+
+.menubar-item:hover, .menubar-item.open { background: var(--hover); }
+.menubar-item.open { background: var(--pressed); }
+.menubar-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 /* MARK: Top bar */
 
 #topbar {
@@ -79,13 +112,11 @@ svg {
   gap: 6px;
   height: var(--bar-height);
   flex: none;
-  padding: 0 calc(var(--caption-width) + 6px) 0 6px;
+  padding: 0 10px 0 6px;
   background: var(--bar-bg);
   border-bottom: 1px solid var(--divider);
   -webkit-app-region: drag;
 }
-
-body.fullscreen #topbar { padding-right: 10px; }
 
 /* Development on macOS: traffic lights sit on the left */
 body.darwin #topbar { padding: 0 10px 0 78px; }
@@ -360,6 +391,7 @@ body.darwin.fullscreen #topbar { padding-left: 6px; }
 
 /* MARK: Full Screen Mode: nothing but the page, centered on black */
 
+body.presenting #menubar,
 body.presenting #topbar,
 body.presenting .thumbnails,
 body.presenting .export-progress { display: none; }

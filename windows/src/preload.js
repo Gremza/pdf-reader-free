@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("host", {
   showInfo: (message, detail) => ipcRenderer.send("show-info", message, detail),
   setDirtyCount: (count) => ipcRenderer.send("set-dirty-count", count),
   popupMenu: (items, x, y) => ipcRenderer.invoke("popup-menu", items, x, y),
+  showMenuBarMenu: (label, x, y) => ipcRenderer.invoke("show-menu-bar-menu", label, x, y),
   closeWindow: () => ipcRenderer.send("close-window"),
   setPresenting: (presenting) => ipcRenderer.send("set-presenting", presenting),
   setMenuState: (state) => ipcRenderer.send("menu-state", state),

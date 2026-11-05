@@ -7,6 +7,8 @@ const updater = require("./updater");
 
 const ROOT = path.join(__dirname, "..");
 const BAR_HEIGHT = 40;
+// On Windows the menu bar (File, Edit, …) is the top row of the window, next to the minimize/maximize/close buttons
+const MENU_BAR_HEIGHT = 32;
 
 // The UI is served from app://app/ so ES modules and the pdf.js worker load like on the web
 protocol.registerSchemesAsPrivileged([
@@ -83,7 +85,7 @@ function createWindow() {
     backgroundColor: overlayColors().color,
     icon: path.join(__dirname, "icon.png"),
     titleBarStyle: "hidden",
-    titleBarOverlay: { ...overlayColors(), height: BAR_HEIGHT },
+    titleBarOverlay: { ...overlayColors(), height: process.platform === "darwin" ? BAR_HEIGHT : MENU_BAR_HEIGHT },
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -385,7 +387,7 @@ ipcMain.handle("popup-menu", (_event, items, x, y) => new Promise((resolve) => {
   });
 }));
 
-// MARK: macOS menu bar
+// MARK: Menu bar
 
 const LAYOUTS = [
   ["single", "Single Page"],
@@ -397,8 +399,13 @@ const LAYOUTS = [
 // What the selected tab allows right now, reported by the renderer
 let menuState = {};
 
-/** The same actions as the top bar buttons; each item runs an action of the renderer. The shortcuts follow Adobe Acrobat Reader. */
-function updateAppMenu() {
+/**
+ * The same actions as the top bar buttons; each item runs an action of the renderer. The shortcuts follow Adobe Acrobat Reader.
+ * macOS shows it as the app menu; on Windows the renderer draws the menu bar and opens each menu with `show-menu-bar-menu`,
+ * so the keys are only shown there and handled by the renderer.
+ */
+function menuTemplate() {
+  const mac = process.platform === "darwin";
   const s = menuState;
   const doc = !!s.hasTab;
   const edit = doc && s.canEdit;
@@ -422,16 +429,19 @@ function updateAppMenu() {
   ];
 
   const updates = updater.updateState();
-  const template = [
-    {
+  const updateItems = [
+    item(updates.checkingForUpdates ? "Checking for Updates…" : "Check for Updates…", "checkForUpdates", { enabled: !updates.checkingForUpdates }),
+    item("Check for Updates Automatically", "toggleCheckForUpdates", { type: "checkbox", checked: updates.checkForUpdates }),
+    item("Install Updates Automatically", "toggleInstallUpdates", {
+      type: "checkbox", checked: updates.installUpdatesAutomatically, enabled: updates.checkForUpdates,
+    }),
+  ];
+  return [
+    mac && {
       label: app.name,
       submenu: [
         { role: "about" },
-        item(updates.checkingForUpdates ? "Checking for Updates…" : "Check for Updates…", "checkForUpdates", { enabled: !updates.checkingForUpdates }),
-        item("Check for Updates Automatically", "toggleCheckForUpdates", { type: "checkbox", checked: updates.checkForUpdates }),
-        item("Install Updates Automatically", "toggleInstallUpdates", {
-          type: "checkbox", checked: updates.installUpdatesAutomatically, enabled: updates.checkForUpdates,
-        }),
+        ...updateItems,
         separator,
         { role: "services" },
         separator,
@@ -447,7 +457,7 @@ function updateAppMenu() {
       submenu: [
         item("New PDF…", "newPDF", { accelerator: "CmdOrCtrl+N" }),
         item("Open…", "open", { accelerator: "CmdOrCtrl+O" }),
-        { role: "recentDocuments", submenu: [{ role: "clearRecentDocuments" }] },
+        mac && { role: "recentDocuments", submenu: [{ role: "clearRecentDocuments" }] },
         item("Close Tab", "closeTab", { accelerator: "CmdOrCtrl+W" }),
         separator,
         item("Save", "save", { accelerator: "CmdOrCtrl+S", enabled: edit && s.isDirty }),
@@ -466,7 +476,9 @@ function updateAppMenu() {
         item("Export as JPG…", "exportJPG", { accelerator: "CmdOrCtrl+E", enabled: edit }),
         separator,
         item("Print…", "print", { accelerator: "CmdOrCtrl+P", enabled: edit }),
-      ],
+        !mac && separator,
+        !mac && { role: "quit", label: "Exit", accelerator: "Alt+F4" },
+      ].filter(Boolean),
     },
     {
       label: "Edit",
@@ -519,20 +531,53 @@ function updateAppMenu() {
       submenu: pageEditItems,
     },
     {
-      role: "windowMenu",
+      label: "Window",
+      ...(mac && { role: "windowMenu" }),
       submenu: [
-        { role: "minimize" },
-        { role: "zoom" },
+        ...(mac
+          ? [{ role: "minimize" }, { role: "zoom" }]
+          : [
+              { label: "Minimize", click: () => win?.minimize() },
+              { label: win?.isMaximized() ? "Restore" : "Maximize", click: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()) },
+            ]),
         separator,
         item("Next Tab", "nextTab", { accelerator: "CmdOrCtrl+Shift+]", enabled: s.tabCount > 1 }),
         item("Previous Tab", "previousTab", { accelerator: "CmdOrCtrl+Shift+[", enabled: s.tabCount > 1 }),
+        mac && separator,
+        mac && { role: "front" },
+      ].filter(Boolean),
+    },
+    // The app menu's items, where Windows apps have them
+    !mac && {
+      label: "Help",
+      submenu: [
+        { label: `About ${app.name}`, click: showAbout },
         separator,
-        { role: "front" },
+        ...updateItems,
       ],
     },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  ].filter(Boolean);
 }
+
+function updateAppMenu() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate()));
+}
+
+function showAbout() {
+  dialog.showMessageBox(win, {
+    type: "info",
+    message: app.name,
+    detail: `Version ${app.getVersion()}\nA free PDF viewer and page editor.`,
+    buttons: ["OK"],
+  });
+}
+
+/** Windows: opens one menu of the menu bar the renderer draws, below its button; resolves when it closes. */
+ipcMain.handle("show-menu-bar-menu", (_event, label, x, y) => new Promise((resolve) => {
+  const menu = menuTemplate().find((entry) => entry.label === label);
+  if (!menu || !win) return resolve();
+  Menu.buildFromTemplate(menu.submenu).popup({ window: win, x: Math.round(x), y: Math.round(y), callback: () => resolve() });
+}));
 
 ipcMain.on("menu-state", (_event, state) => {
   menuState = state;

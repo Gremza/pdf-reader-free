@@ -36,9 +36,9 @@
 - **Export to JPG** — saves every page as an image (`1.jpg`, `2.jpg`, …) in a new folder named after the PDF
 - **Take a Snapshot** (Edit menu or right-click on a page) — drag over part of a page to save it as a JPG at 300 dpi; it is also copied to the clipboard, like in Acrobat. `Esc` cancels
 - **Print** — the system print dialog with printer, pages, copies, paper size and orientation; prints unsaved edits too, and turns pages of the other orientation to fill the sheet
-- **Updates** — checks GitHub for a new version at launch and once a day; installs it automatically or asks first (*Check for Updates…*, *Check for Updates Automatically*, *Install Updates Automatically* in the app menu on macOS and the **Updates** button on Windows)
+- **Updates** — checks GitHub for a new version at launch and once a day; installs it automatically or asks first (*Check for Updates…*, *Check for Updates Automatically*, *Install Updates Automatically* in the app menu on macOS, and in the Help menu and the **Updates** button on Windows)
 - **Keyboard shortcuts like Adobe Acrobat Reader**, shown next to the menu items
-- On macOS every action is also in the menu bar (File, Edit, View, Pages)
+- Every action is also in the menu bar (File, Edit, View, Pages, Window): the system menu bar on macOS, the top row of the window on Windows (also with `Alt` + the first letter, e.g. `Alt+F`)
 - Open via `⌘O`, drag & drop, the Dock icon, or Finder's *Open With*
 - No tracking, no accounts; the only network access is the update check (it can be turned off)
 

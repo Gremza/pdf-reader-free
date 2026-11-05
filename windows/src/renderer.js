@@ -1456,7 +1456,7 @@ function updateSearchCount() {
 
 let lastMenuState = "";
 
-/** Tells the macOS menu bar what is enabled and checked for the selected tab. */
+/** Tells the menu bar what is enabled and checked for the selected tab. */
 function syncMenu() {
   const tab = state.selected;
   const menuState = {
@@ -1618,7 +1618,28 @@ function showViewMenu(tab, x, y) {
   });
 }
 
-/** The "Updates" button; on macOS the same items are in the app menu. */
+/** Windows: opens a menu of the menu bar below its button. */
+async function showMenuBarMenu(button) {
+  closeMenus();
+  syncMenu();
+  const rect = button.getBoundingClientRect();
+  button.classList.add("open");
+  try {
+    await window.host.showMenuBarMenu(button.dataset.menu, rect.left, rect.bottom);
+  } finally {
+    button.classList.remove("open");
+  }
+  updateControls();
+}
+
+for (const button of document.querySelectorAll(".menubar-item")) {
+  button.addEventListener("click", () => showMenuBarMenu(button));
+}
+
+// Alt and the first letter open a menu, as in other Windows apps
+const menuBarKeys = { "Alt+f": "File", "Alt+e": "Edit", "Alt+v": "View", "Alt+p": "Pages", "Alt+w": "Window", "Alt+h": "Help" };
+
+/** The "Updates" button; on macOS the same items are in the app menu, on Windows also in the Help menu. */
 function showUpdatesMenu() {
   const rect = el.updatesButton.getBoundingClientRect();
   const updates = state.updates;
@@ -1897,6 +1918,11 @@ document.addEventListener("keydown", (event) => {
   const combo = [event.ctrlKey && "Ctrl", event.shiftKey && "Shift", event.altKey && "Alt", key].filter(Boolean).join("+");
   const action = (state.presenting && presentationKeys[combo]) || shortcuts[combo];
   const inField = event.target instanceof HTMLInputElement;
+  if (menuBarKeys[combo] && window.host.platform !== "darwin" && !state.presenting) {
+    event.preventDefault();
+    showMenuBarMenu(document.querySelector(`.menubar-item[data-menu="${menuBarKeys[combo]}"]`));
+    return;
+  }
   if (action && !(inField && fieldKeys.has(combo))) {
     event.preventDefault();
     closeMenus();
@@ -1907,7 +1933,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// The macOS menu bar
+// The menu bar
 window.host.onMenuAction((action) => {
   if (el.promptDialog.open) return;
   closeMenus();
