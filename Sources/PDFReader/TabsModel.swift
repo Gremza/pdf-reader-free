@@ -33,6 +33,8 @@ final class TabsModel: ObservableObject {
     @Published var isFullScreen = false
     /// Full Screen Mode: only the page, without the top bar and thumbnails.
     @Published private(set) var isPresenting = false
+    /// Full Screen Mode with the page hidden behind black, like B in PowerPoint.
+    @Published private(set) var isBlackedOut = false
     @Published var showThumbnails = true
     weak var window: NSWindow?
 
@@ -235,6 +237,7 @@ final class TabsModel: ObservableObject {
     func endPresentation() {
         guard isPresenting else { return }
         isPresenting = false
+        isBlackedOut = false
         presented?.setPresenting(false)
         presented = nil
         if let presentationMonitor { NSEvent.removeMonitor(presentationMonitor) }
@@ -257,6 +260,16 @@ final class TabsModel: ObservableObject {
     /// Returns whether the event was used.
     private func handlePresentationEvent(_ event: NSEvent) -> Bool {
         guard isPresenting, event.window === window, let model = presented else { return false }
+        if isBlackedOut {
+            // Like PowerPoint: any key or click brings the page back without turning it; Esc also exits
+            if event.type == .keyDown {
+                guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { return false }
+                if event.charactersIgnoringModifiers == "\u{1b}" { endPresentation() }
+            }
+            isBlackedOut = false
+            NSCursor.setHiddenUntilMouseMoves(true)
+            return true
+        }
         switch event.type {
         case .leftMouseDown:
             guard !model.isLink(at: event.locationInWindow) else { return false }
@@ -275,6 +288,7 @@ final class TabsModel: ObservableObject {
             case (.end?, _): model.lastPage()
             case (_, " "?): shift ? model.previousPage() : model.nextPage()
             case (_, "\u{1b}"?): endPresentation()
+            case (_, "b"?), (_, "B"?), (_, "."?): isBlackedOut = true
             default: return false
             }
         }

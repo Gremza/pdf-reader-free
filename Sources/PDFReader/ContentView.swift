@@ -19,6 +19,10 @@ struct ContentView: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
+        .overlay {
+            // B in Full Screen Mode hides the page, like a black screen in PowerPoint
+            if tabs.isBlackedOut { Color.black.ignoresSafeArea() }
+        }
         .frame(minWidth: 860, minHeight: 500)
         .background(WindowChrome(tabs: tabs))
         .dropDestination(for: URL.self) { urls, _ in

@@ -1674,7 +1674,7 @@ function startPresentation() {
 function endPresentation() {
   if (!state.presenting) return;
   state.presenting = false;
-  document.body.classList.remove("presenting", "hide-cursor");
+  document.body.classList.remove("presenting", "hide-cursor", "blacked-out");
   state.selected?.setPresenting(false);
   window.host.setPresenting(false);
   updateControls();
@@ -1695,7 +1695,26 @@ const presentationKeys = {
   "Home": "firstPage",
   "End": "lastPage",
   "Escape": "fullScreen",
+  "b": "blackScreen",
+  "Shift+b": "blackScreen",
+  ".": "blackScreen",
 };
+
+/** B hides the page behind black, like PowerPoint. */
+function blackScreen() {
+  if (state.presenting) document.body.classList.add("blacked-out");
+}
+
+// While the screen is black, any key or click only brings the page back; Esc also exits
+function endBlackScreen(event) {
+  if (!document.body.classList.contains("blacked-out")) return;
+  if (event.type === "keydown" && (event.ctrlKey || event.altKey || event.metaKey)) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  document.body.classList.remove("blacked-out");
+  if (event.key === "Escape") endPresentation();
+}
+for (const type of ["keydown", "click", "contextmenu"]) window.addEventListener(type, endBlackScreen, true);
 
 // A click goes to the next page and a right click to the previous one; links still work
 el.documents.addEventListener("click", (event) => {
@@ -1760,6 +1779,7 @@ const actions = {
   saveAs: withTab((tab) => tab.saveAs()),
   undo: withTab((tab) => tab.undo()),
   fullScreen: () => (state.presenting ? endPresentation() : startPresentation()),
+  blackScreen,
   focusSearch: withTab(() => {
     if (state.presenting) return;
     el.searchField.focus();

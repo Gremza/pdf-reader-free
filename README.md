@@ -23,7 +23,7 @@
 - **Layouts**: single page, continuous, two pages, two pages continuous
 - **Fade Between Pages** — page turns cross-fade from one page to the next; on by default, turn it off in the View menu or the Document button
 - **Rotate** pages left / right
-- **Full Screen Mode** — only the page, on black, without bars or borders; turn pages like a presentation with the arrow keys, `Space`, `Page Up` / `Page Down` or a click (right-click goes back); `Esc` exits
+- **Full Screen Mode** — only the page, on black, without bars or borders; turn pages like a presentation with the arrow keys, `Space`, `Page Up` / `Page Down` or a click (right-click goes back); `B` blacks out the screen like PowerPoint; `Esc` exits
 - **Search** text inside the document
 - **New PDF** — make a new PDF from PDFs and images (JPG, PNG and more), one after the other in the order of their names; save it with Save
 - **Edit pages**: delete, rotate, insert blank pages, insert PDFs or images (each image becomes a page), add them at the end, with undo
@@ -72,7 +72,7 @@ The same as in Adobe Acrobat Reader.
 | Save / Save As | `⌘S` / `⌘⇧S` | `Ctrl+S` / `Ctrl+Shift+S` |
 | Undo | `⌘Z` | `Ctrl+Z` |
 
-In Full Screen Mode: `→` `↓` `Space` `Page Down` `Enter` or a click for the next page, `←` `↑` `Shift+Space` `Page Up` `Backspace` or a right-click for the previous one, `Home` / `End` for the first / last page, `Esc` to exit.
+In Full Screen Mode: `→` `↓` `Space` `Page Down` `Enter` or a click for the next page, `←` `↑` `Shift+Space` `Page Up` `Backspace` or a right-click for the previous one, `Home` / `End` for the first / last page, `B` or `.` for a black screen (any key or click brings the page back), `Esc` to exit.
 
 ## Install
 

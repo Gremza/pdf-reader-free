@@ -406,6 +406,8 @@ body.hide-cursor, body.hide-cursor * { cursor: none !important; }
   padding: 0;
 }
 .document.presenting .viewer-container .pdfViewer .page { box-shadow: none; margin: 0 auto; }
+/* B in Full Screen Mode: black over everything, like PowerPoint */
+body.blacked-out::after { content: ""; position: fixed; inset: 0; z-index: 10000; background: #000000; }
 
 /* Printing: only the page images, one per sheet, scaled to fit (as in pdf.js) */
 #print-container { display: none; }
