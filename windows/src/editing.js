@@ -1,4 +1,5 @@
 import { EncryptedPDFError, PDFDocument, degrees } from "../node_modules/pdf-lib/dist/pdf-lib.esm.min.js";
+import { drawImageOnPage, insertImagePage, isPDF, readImage } from "./images.js";
 
 /** Page operations. Each takes the PDF bytes and returns new bytes; the input is never modified. */
 
@@ -46,16 +47,47 @@ export const pageEdits = {
     doc.insertPage(index, [width, height]);
   }),
 
-  /** Inserts all pages of the given PDFs at `index`, in order. */
-  insertPDFs: (bytes, index, others) => edit(bytes, async (doc) => {
-    let at = index;
-    for (const other of others) {
-      const source = await load(other);
+  /** Inserts the pages of PDFs, and images as pages of their own, at `index`, in order. */
+  insertFiles: (bytes, index, files) => edit(bytes, (doc) => insertFiles(doc, index, files)),
+
+  /** Draws an image of `readImage` over the page; `matrix` maps the unit square, upright as shown, onto the page. */
+  addImage: (bytes, index, image, matrix) => edit(bytes, (doc) => drawImageOnPage(doc, index, image, matrix)),
+};
+
+/** "New PDF…": a PDF of the given PDFs and images ({ name, data }), in order. */
+export async function createPDF(files) {
+  const doc = await PDFDocument.create();
+  await insertFiles(doc, 0, files);
+  return doc.save();
+}
+
+/** Files that can't be read throw an error that names them. */
+async function insertFiles(doc, index, files) {
+  let at = index;
+  for (const file of files) {
+    if (isPDF(file.data)) {
+      let source;
+      try {
+        source = await load(file.data);
+      } catch (error) {
+        if (error instanceof ProtectedPDFError) throw error;
+        throw new UnreadableFileError(file.name);
+      }
       const pages = await doc.copyPages(source, source.getPageIndices());
       for (const page of pages) doc.insertPage(at++, page);
+    } else {
+      let image;
+      try {
+        image = await readImage(file.data);
+      } catch {
+        throw new UnreadableFileError(file.name);
+      }
+      await insertImagePage(doc, image, at++);
     }
-  }),
-};
+  }
+}
+
+export class UnreadableFileError extends Error {}
 
 /** A new PDF with only the given pages (0-based), in that order. */
 export async function extractPages(bytes, indexes) {

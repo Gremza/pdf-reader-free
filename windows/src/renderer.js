@@ -1,5 +1,8 @@
 import * as pdfjsLib from "../node_modules/pdfjs-dist/build/pdf.mjs";
-import { ProtectedPDFError, assertEditable, extractPages, pageEdits, parsePageRanges } from "./editing.js";
+import {
+  ProtectedPDFError, UnreadableFileError, assertEditable, createPDF, extractPages, pageEdits, parsePageRanges,
+} from "./editing.js";
+import { readImage } from "./images.js";
 import { extractDocument, hasText } from "./word.js";
 import { REDUCED_QUALITIES, reduceImages } from "./reduce.js";
 import { CancelledError, recognizeText } from "./ocr.js";
@@ -53,6 +56,9 @@ const el = {
   exportBar: $("export-bar"),
   exportLabel: $("export-label"),
   exportCancel: $("export-cancel"),
+  placementBar: $("placement-bar"),
+  placementCancel: $("placement-cancel"),
+  placementPlace: $("placement-place"),
   documentButton: $("document-button"),
   promptDialog: $("prompt-dialog"),
   promptField: $("prompt-field"),
@@ -62,6 +68,7 @@ const el = {
   documents: $("documents"),
   emptyState: $("empty-state"),
   openButton: $("open-button"),
+  newButton: $("new-button"),
   updatesButton: $("updates-button"),
   updateProgress: $("update-progress"),
   updateBar: $("update-bar"),
@@ -105,6 +112,7 @@ const PRINT_DPI = 200;
 // MARK: - Document tab
 
 class DocumentTab {
+  /** A tab of "New PDF…" has no path and is unsaved from the start; "Save" asks where to save it. */
   constructor(file, pdfDocument) {
     this.id = nextID++;
     this.path = file.path;
@@ -112,7 +120,7 @@ class DocumentTab {
     this.pdf = pdfDocument;
     // The PDF as it is now, as last saved, and before each edit (for undo)
     this.bytes = file.data;
-    this.savedBytes = file.data;
+    this.savedBytes = file.path ? file.data : null;
     this.history = [];
     this.fitMode = "width";
     this.layout = "single";
@@ -153,6 +161,9 @@ class DocumentTab {
         this.pendingPage = null;
       }
     });
+    // pdf.js empties a page when it draws it again, so the image being placed goes back on top
+    this.eventBus.on("pagerender", () => this.attachPlacement());
+    this.eventBus.on("pagerendered", () => this.attachPlacement());
     this.eventBus.on("pagechanging", ({ pageNumber }) => {
       this.currentPage = pageNumber;
       this.updateCurrentThumbnail();
@@ -193,6 +204,7 @@ class DocumentTab {
   get baseName() { return this.name.replace(/\.pdf$/i, ""); }
 
   destroy() {
+    this.endPlacing();
     // A running "Recognize Text" stops without a message
     if (this.exportProgress?.cancellable) this.exportProgress.cancelled = true;
     this.thumbnailObserver?.disconnect();
@@ -356,7 +368,8 @@ class DocumentTab {
 
   // MARK: Editing
 
-  get canEdit() { return !this.busy && !this.exportProgress; }
+  /** Edits wait while an export reads the document or an image is being placed. */
+  get canEdit() { return !this.busy && !this.exportProgress && !this.placement; }
 
   /**
    * Runs a page operation on the PDF bytes and shows the result; the previous bytes go on the undo stack.
@@ -429,8 +442,11 @@ class DocumentTab {
     this.applyEdit((bytes) => pageEdits.insertBlank(bytes, after), after + 1);
   }
 
-  /** Lets the user pick PDFs and inserts their pages after page `after` (0 = at the start). */
-  async insertPDFs(after, title) {
+  /**
+   * Lets the user pick PDFs and images and inserts them after page `after` (0 = at the start).
+   * Each image becomes a page of its own.
+   */
+  async insertFiles(after, title) {
     if (!this.canEdit) return;
     try {
       await assertEditable(this.bytes);
@@ -438,9 +454,155 @@ class DocumentTab {
       showEditError(error);
       return;
     }
-    const files = await window.host.pickPDFs(title);
+    const files = await pickFiles({ title });
     if (!files.length) return;
-    this.applyEdit((bytes) => pageEdits.insertPDFs(bytes, after, files.map((file) => file.data)), after + 1);
+    this.applyEdit((bytes) => pageEdits.insertFiles(bytes, after, files), after + 1);
+  }
+
+  // MARK: Add Image to Page
+
+  /** Puts the chosen image in the middle of the page, at most half its size, to be moved and resized. */
+  async addImage(number) {
+    if (!this.canEdit) return;
+    try {
+      await assertEditable(this.bytes);
+    } catch (error) {
+      showEditError(error);
+      return;
+    }
+    const [file] = await window.host.pickFiles({ title: `Choose the image to add to page ${number}`, imagesOnly: true });
+    if (!file || !this.canEdit) return;
+    let image;
+    try {
+      image = await readImage(file.data);
+    } catch {
+      window.host.showError("The file can't be opened", file.name);
+      return;
+    }
+    // Fractions of the page as it is shown, from the top left
+    const { width, height } = (await this.pdf.getPage(number)).getViewport({ scale: 1 });
+    const scale = Math.min(width / 2 / image.width, height / 2 / image.height, 1);
+    const w = (image.width * scale) / width;
+    const h = (image.height * scale) / height;
+    const url = URL.createObjectURL(new Blob([image.bytes]));
+    this.placement = { page: number, image, url, pageWidth: width, rect: { x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h } };
+    this.placement.element = this.placementElement(url);
+    this.layoutPlacement();
+    this.goToPage(number);
+    this.attachPlacement();
+    updatePlacementBar();
+  }
+
+  /** The image with a handle on each corner; dragging the image moves it, dragging a corner resizes it. */
+  placementElement(url) {
+    const element = document.createElement("div");
+    element.className = "image-placement";
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "";
+    img.draggable = false;
+    element.append(img);
+    for (const corner of ["tl", "tr", "bl", "br"]) {
+      const handle = document.createElement("span");
+      handle.className = `handle ${corner}`;
+      handle.dataset.corner = corner;
+      element.append(handle);
+    }
+    element.addEventListener("pointerdown", (event) => this.dragPlacement(event));
+    return element;
+  }
+
+  attachPlacement() {
+    const placement = this.placement;
+    const div = placement && this.viewer.getPageView(placement.page - 1)?.div;
+    if (div && placement.element.parentNode !== div) div.append(placement.element);
+  }
+
+  layoutPlacement() {
+    const { element, rect } = this.placement;
+    element.style.left = `${rect.x * 100}%`;
+    element.style.top = `${rect.y * 100}%`;
+    element.style.width = `${rect.width * 100}%`;
+    element.style.height = `${rect.height * 100}%`;
+  }
+
+  dragPlacement(event) {
+    const placement = this.placement;
+    const page = placement?.element.parentNode;
+    if (!page || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const box = page.getBoundingClientRect();
+    const corner = event.target.dataset.corner;
+    const start = { ...placement.rect };
+    const from = { x: event.clientX, y: event.clientY };
+    // In pixels of the page: the shape of the image, the opposite corner (for resizing) and the smallest size, 8 points
+    const aspect = (start.width * box.width) / (start.height * box.height);
+    const fixedX = (corner?.includes("l") ? start.x + start.width : start.x) * box.width;
+    const fixedY = (corner?.includes("t") ? start.y + start.height : start.y) * box.height;
+    const smallest = (8 * box.width) / placement.pageWidth;
+    const element = placement.element;
+    element.setPointerCapture(event.pointerId);
+    element.classList.toggle("moving", !corner);
+
+    const move = (moveEvent) => {
+      if (!corner) {
+        const x = start.x + (moveEvent.clientX - from.x) / box.width;
+        const y = start.y + (moveEvent.clientY - from.y) / box.height;
+        placement.rect = { ...start, x: Math.min(Math.max(x, 0), 1 - start.width), y: Math.min(Math.max(y, 0), 1 - start.height) };
+      } else {
+        // Keeps the shape of the image; never larger than the page
+        const px = moveEvent.clientX - box.left;
+        const py = moveEvent.clientY - box.top;
+        const right = px >= fixedX;
+        const down = py >= fixedY;
+        const roomX = right ? box.width - fixedX : fixedX;
+        const roomY = down ? box.height - fixedY : fixedY;
+        const width = Math.min(Math.max(Math.abs(px - fixedX), Math.abs(py - fixedY) * aspect, smallest), roomX, roomY * aspect);
+        const height = width / aspect;
+        placement.rect = {
+          x: (right ? fixedX : fixedX - width) / box.width,
+          y: (down ? fixedY : fixedY - height) / box.height,
+          width: width / box.width,
+          height: height / box.height,
+        };
+      }
+      this.layoutPlacement();
+    };
+    const end = () => {
+      element.classList.remove("moving");
+      element.removeEventListener("pointermove", move);
+      element.removeEventListener("pointerup", end);
+      element.removeEventListener("pointercancel", end);
+    };
+    element.addEventListener("pointermove", move);
+    element.addEventListener("pointerup", end);
+    element.addEventListener("pointercancel", end);
+  }
+
+  /** Draws the image into the page, as an edit that can be undone. */
+  placeImage() {
+    const placement = this.placement;
+    if (!placement) return;
+    this.endPlacing();
+    // The viewport maps the page as it is shown back to the PDF, whatever its rotation
+    const { viewport } = this.viewer.getPageView(placement.page - 1);
+    const { x, y, width, height } = placement.rect;
+    const point = (fx, fy) => viewport.convertToPdfPoint(fx * viewport.width, fy * viewport.height);
+    const [left, bottom] = point(x, y + height);
+    const [rightX, rightY] = point(x + width, y + height);
+    const [topX, topY] = point(x, y);
+    const matrix = [rightX - left, rightY - bottom, topX - left, topY - bottom, left, bottom];
+    this.applyEdit((bytes) => pageEdits.addImage(bytes, placement.page - 1, placement.image, matrix), placement.page);
+  }
+
+  /** Takes the image away again; `placeImage` draws it into the page for good. */
+  endPlacing() {
+    if (!this.placement) return;
+    this.placement.element.remove();
+    URL.revokeObjectURL(this.placement.url);
+    this.placement = null;
+    if (this === state.selected) updatePlacementBar();
   }
 
   /** Asks which pages to keep and saves them as a new PDF. */
@@ -563,6 +725,7 @@ class DocumentTab {
 
   /** Writes back to the file; returns false when it failed. */
   async save() {
+    if (!this.path) return this.saveAs();
     if (!this.isDirty) return true;
     const bytes = this.bytes;
     try {
@@ -932,7 +1095,7 @@ function loadPDF(bytes) {
 async function openFiles(files) {
   const failed = [];
   for (const file of files) {
-    const existing = state.tabs.find((tab) => tab.path.toLowerCase() === file.path.toLowerCase());
+    const existing = state.tabs.find((tab) => tab.path?.toLowerCase() === file.path.toLowerCase());
     if (existing) {
       select(existing);
       continue;
@@ -947,6 +1110,36 @@ async function openFiles(files) {
     }
   }
   if (failed.length) window.host.reportFailed(failed);
+}
+
+/** PDFs and images ({ name, data }), in the order of their names. */
+async function pickFiles(options) {
+  const files = await window.host.pickFiles(options);
+  return files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+/** "New PDF…": a new, unsaved PDF made of the chosen PDFs and images, in the order of their names. */
+async function newPDF() {
+  const files = await pickFiles({ title: "Choose the PDFs and images for the new PDF", buttonLabel: "Create" });
+  if (!files.length) return;
+  try {
+    const data = await createPDF(files);
+    const tab = new DocumentTab({ path: null, name: untitledName(), data }, await loadPDF(data));
+    state.tabs.push(tab);
+    select(tab);
+    updateDirtyCount();
+  } catch (error) {
+    if (error instanceof UnreadableFileError || error instanceof ProtectedPDFError) showEditError(error);
+    else window.host.showError("The file can't be opened", errorMessage(error));
+  }
+}
+
+/** "Untitled.pdf", or "Untitled 2.pdf" and so on when that name is taken by another tab. */
+function untitledName() {
+  const names = new Set(state.tabs.map((tab) => tab.name));
+  let name = "Untitled.pdf";
+  for (let number = 2; names.has(name); number++) name = `Untitled ${number}.pdf`;
+  return name;
 }
 
 // MARK: - Tabs
@@ -1027,7 +1220,9 @@ function errorMessage(error) {
 }
 
 function showEditError(error) {
-  if (error instanceof ProtectedPDFError) {
+  if (error instanceof UnreadableFileError) {
+    window.host.showError("The file can't be opened", error.message);
+  } else if (error instanceof ProtectedPDFError) {
     window.host.showError("This PDF is protected", "PDFs protected by a password or restrictions can't be edited.");
   } else {
     window.host.showError("Edit failed", errorMessage(error));
@@ -1059,6 +1254,7 @@ function render() {
   renderTabs();
   updateControls();
   updateExportProgress();
+  updatePlacementBar();
   if (tab) {
     el.searchField.value = tab.searchText;
     updateSearchCount();
@@ -1106,7 +1302,7 @@ function tabElement(tab, width) {
   const item = document.createElement("div");
   item.className = "tab" + (tab === state.selected ? " selected" : "");
   item.style.width = `${width}px`;
-  item.title = tab.path;
+  item.title = tab.path ?? tab.name;
   item.tabIndex = 0;
   item.setAttribute("role", "tab");
   item.setAttribute("aria-selected", tab === state.selected);
@@ -1201,6 +1397,12 @@ function updateExportProgress() {
   el.exportCancel.disabled = progress.cancelled;
 }
 
+/** "Add Image to Page": shown while the image is moved and resized. */
+function updatePlacementBar() {
+  syncMenu();
+  el.placementBar.hidden = !state.selected?.placement || state.presenting;
+}
+
 function updateSearchCount() {
   const tab = state.selected;
   const { current, total } = tab?.matches ?? {};
@@ -1265,6 +1467,8 @@ function showDocumentMenu() {
   const enabled = tab.canEdit;
   const rect = el.documentButton.getBoundingClientRect();
   popup([
+    { id: "new", label: "New PDF…", accelerator: "Ctrl+N" },
+    { type: "separator" },
     { id: "save", label: "Save", accelerator: "Ctrl+S", enabled: enabled && tab.isDirty },
     { id: "saveAs", label: "Save As…", accelerator: "Ctrl+Shift+S", enabled },
     { id: "undo", label: "Undo", accelerator: "Ctrl+Z", enabled: enabled && tab.history.length > 0 },
@@ -1277,8 +1481,9 @@ function showDocumentMenu() {
     { id: "rotateAllRight", label: "Rotate Right", accelerator: "Ctrl+Shift+=", enabled },
     { type: "separator" },
     { id: "blank", label: `Insert Blank Page After Page ${n}`, enabled },
-    { id: "insert", label: `Insert Pages from PDF After Page ${n}…`, accelerator: "Ctrl+Shift+I", enabled },
-    { id: "merge", label: "Merge PDFs at End…", enabled },
+    { id: "insert", label: `Insert PDFs or Images After Page ${n}…`, accelerator: "Ctrl+Shift+I", enabled },
+    { id: "addAtEnd", label: "Add PDFs or Images at End…", enabled },
+    { id: "image", label: `Add Image to Page ${n}…`, enabled },
     { id: "delete", label: `Delete Page ${n}`, accelerator: "Ctrl+Shift+D", enabled: enabled && tab.pageCount > 1 },
     { type: "separator" },
     { id: "rotateLeft", label: `Rotate Page ${n} Left`, enabled },
@@ -1294,6 +1499,7 @@ function showDocumentMenu() {
     { type: "separator" },
     { id: "print", label: "Print…", accelerator: "Ctrl+P", enabled },
   ], rect.left, rect.bottom + 4, {
+    new: newPDF,
     save: () => tab.save(),
     saveAs: () => tab.saveAs(),
     undo: () => tab.undo(),
@@ -1302,8 +1508,9 @@ function showDocumentMenu() {
     rotateAllLeft: () => tab.rotate(-90),
     rotateAllRight: () => tab.rotate(90),
     blank: () => tab.insertBlankPage(n),
-    insert: () => tab.insertPDFs(n, "Choose the PDFs to insert"),
-    merge: () => tab.insertPDFs(tab.pageCount, "Choose the PDFs to merge"),
+    insert: () => tab.insertFiles(n, "Choose the PDFs or images to insert"),
+    addAtEnd: () => tab.insertFiles(tab.pageCount, "Choose the PDFs or images to add at the end"),
+    image: () => tab.addImage(n),
     delete: () => tab.deletePage(n),
     rotateLeft: () => tab.rotatePage(n, -90),
     rotateRight: () => tab.rotatePage(n, 90),
@@ -1325,7 +1532,8 @@ function showPageMenu(tab, n, x, y) {
     { id: "rotateRight", label: "Rotate Right", enabled },
     { type: "separator" },
     { id: "blank", label: "Insert Blank Page After This", enabled },
-    { id: "insert", label: "Insert Pages from PDF After This…", enabled },
+    { id: "insert", label: "Insert PDFs or Images After This…", enabled },
+    { id: "image", label: "Add Image to This Page…", enabled },
     { id: "extract", label: "Save This Page as PDF…", enabled },
     { type: "separator" },
     { id: "delete", label: "Delete Page", accelerator: "Delete", enabled: enabled && tab.pageCount > 1 },
@@ -1333,7 +1541,8 @@ function showPageMenu(tab, n, x, y) {
     rotateLeft: () => tab.rotatePage(n, -90),
     rotateRight: () => tab.rotatePage(n, 90),
     blank: () => tab.insertBlankPage(n),
-    insert: () => tab.insertPDFs(n, "Choose the PDFs to insert"),
+    insert: () => tab.insertFiles(n, "Choose the PDFs or images to insert"),
+    image: () => tab.addImage(n),
     extract: () => tab.extractPagesPrompt(`${n}`),
     delete: () => tab.deletePage(n),
   });
@@ -1361,6 +1570,7 @@ function startPresentation() {
   const tab = state.selected;
   if (state.presenting || !tab) return;
   closeMenus();
+  tab.endPlacing();
   state.presenting = true;
   document.body.classList.add("presenting", "hide-cursor");
   tab.setPresenting(true);
@@ -1425,6 +1635,7 @@ function withTab(action) {
 
 const actions = {
   open: () => window.host.showOpenDialog(),
+  newPDF,
   closeTab: closeSelected,
   nextTab: () => selectOffset(1),
   previousTab: () => selectOffset(-1),
@@ -1469,8 +1680,9 @@ const actions = {
   },
   // Also in the document menu of the top bar, for the current page
   insertBlankPage: withTab((tab) => tab.insertBlankPage(tab.currentPage)),
-  insertPDFs: withTab((tab) => tab.insertPDFs(tab.currentPage, "Choose the PDFs to insert")),
-  mergePDFs: withTab((tab) => tab.insertPDFs(tab.pageCount, "Choose the PDFs to merge")),
+  insertFiles: withTab((tab) => tab.insertFiles(tab.currentPage, "Choose the PDFs or images to insert")),
+  addFilesAtEnd: withTab((tab) => tab.insertFiles(tab.pageCount, "Choose the PDFs or images to add at the end")),
+  addImage: withTab((tab) => tab.addImage(tab.currentPage)),
   deletePage: withTab((tab) => tab.deletePage(tab.currentPage)),
   rotatePageLeft: withTab((tab) => tab.rotatePage(tab.currentPage, -90)),
   rotatePageRight: withTab((tab) => tab.rotatePage(tab.currentPage, 90)),
@@ -1486,6 +1698,9 @@ const actions = {
 };
 
 el.openButton.addEventListener("click", actions.open);
+el.newButton.addEventListener("click", newPDF);
+el.placementCancel.addEventListener("click", () => state.selected?.endPlacing());
+el.placementPlace.addEventListener("click", () => state.selected?.placeImage());
 el.exportCancel.addEventListener("click", () => {
   const progress = state.selected?.exportProgress;
   if (progress?.cancellable) progress.cancelled = true;
@@ -1531,6 +1746,7 @@ el.searchField.addEventListener("keydown", (event) => {
 // The same as Adobe Acrobat Reader
 const shortcuts = {
   "Ctrl+o": "open",
+  "Ctrl+n": "newPDF",
   "Ctrl+w": "closeTab",
   "Ctrl+F4": "closeTab",
   "Ctrl+Tab": "nextTab",
@@ -1567,7 +1783,7 @@ const shortcuts = {
   "Ctrl+s": "save",
   "Ctrl+Shift+s": "saveAs",
   "Ctrl+z": "undo",
-  "Ctrl+Shift+i": "insertPDFs",
+  "Ctrl+Shift+i": "insertFiles",
   "Ctrl+Shift+d": "deletePage",
   "F4": "toggleThumbnails",
   "Ctrl+l": "fullScreen",
@@ -1584,6 +1800,14 @@ const fieldKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "H
 
 document.addEventListener("keydown", (event) => {
   if (el.promptDialog.open) return;
+  // "Add Image to Page": Enter places the image, Esc takes it away
+  const placing = state.selected?.placement;
+  if (placing && (event.key === "Enter" || event.key === "Escape") && !(event.target instanceof HTMLInputElement)) {
+    event.preventDefault();
+    if (event.key === "Enter") state.selected.placeImage();
+    else state.selected.endPlacing();
+    return;
+  }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const combo = [event.ctrlKey && "Ctrl", event.shiftKey && "Shift", event.altKey && "Alt", key].filter(Boolean).join("+");
   const action = (state.presenting && presentationKeys[combo]) || shortcuts[combo];

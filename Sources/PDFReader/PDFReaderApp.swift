@@ -21,6 +21,8 @@ struct PDFReaderApp: App {
                 UpdateMenuItems(updater: UpdateChecker.shared)
             }
             CommandGroup(replacing: .newItem) {
+                Button("New PDF…") { tabs.showNewPDFPanel() }
+                    .keyboardShortcut("n")
                 Button("Open…") { tabs.showOpenPanel() }
                     .keyboardShortcut("o")
             }

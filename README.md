@@ -25,7 +25,9 @@
 - **Rotate** pages left / right
 - **Full Screen Mode** — only the page, on black, without bars or borders; turn pages like a presentation with the arrow keys, `Space`, `Page Up` / `Page Down` or a click (right-click goes back); `Esc` exits
 - **Search** text inside the document
-- **Edit pages**: delete, rotate, insert blank pages, insert pages from other PDFs, merge PDFs, with undo
+- **New PDF** — make a new PDF from PDFs and images (JPG, PNG and more), one after the other in the order of their names; save it with Save
+- **Edit pages**: delete, rotate, insert blank pages, insert PDFs or images (each image becomes a page), add them at the end, with undo
+- **Add Image to Page** — put a picture, logo or signature on a page: drag it into place, drag a corner to resize it, then *Place Image*
 - **Save / Save As** — changes are only written when you save; unsaved tabs show `●` and ask before closing
 - **Extract pages** (e.g. `1-3, 5`) into a new PDF, or **split** every page into its own PDF
 - **Reduce File Size** — saves a smaller copy whose images are stored again as JPEG at high, medium or low quality (200, 144 or 96 dpi); the original stays unchanged
@@ -61,7 +63,8 @@ The same as in Adobe Acrobat Reader.
 | Show / hide thumbnails | `F4` | `F4` |
 | Search | `⌘F` | `Ctrl+F` |
 | Find next / previous | `⌘G` / `⌘⇧G` | `Ctrl+G` / `Ctrl+Shift+G` (or `F3` / `Shift+F3`) |
-| Insert pages from PDF | `⌘⇧I` | `Ctrl+Shift+I` |
+| New PDF | `⌘N` | `Ctrl+N` |
+| Insert PDFs or images | `⌘⇧I` | `Ctrl+Shift+I` |
 | Delete page | `⌘⇧D` | `Ctrl+Shift+D` |
 | Export pages to JPG | `⌘E` | `Ctrl+E` |
 | Print | `⌘P` | `Ctrl+P` |
@@ -120,6 +123,7 @@ Sources/PDFReader/
   TopBar.swift         Tab strip with overflow + toolbar controls
   ContentView.swift    Window layout, empty state, drag & drop
   PDFViewModel.swift   Navigation, zoom, layouts, search, page edits, undo, save, export
+  PageImages.swift     Images as pages, New PDF, Add Image to Page
   ThumbnailSidebar.swift  Thumbnails: reorder by drag, page context menu
   WordExport.swift     PDF text → paragraphs → .docx
   PDFKitViews.swift    PDFView wrapper
@@ -132,7 +136,8 @@ windows/src/
   preload.js           Bridge between the window and the main process
   index.html           Top bar, empty state
   renderer.js          Tabs, navigation, zoom, layouts, rotation, search, thumbnails
-  editing.js           Page edits with pdf-lib
+  editing.js           Page edits with pdf-lib, New PDF
+  images.js            Images as pages and over a page (JPEG / PNG kept as they are)
   reduce.js            Reduce File Size: images recompressed as JPEG
   ocr.js               Recognize Text with Tesseract (models in tessdata/)
   styles.css           Light / dark theme

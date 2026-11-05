@@ -168,7 +168,7 @@ private struct TabItem: View {
             tabs.moveTab(id, to: tab.id)
             return true
         } isTargeted: { isDropTarget = $0 }
-        .help(tab.url.path)
+        .help(model.isNew ? tab.title : tab.url.path)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -281,6 +281,8 @@ private struct DocumentMenu: View {
 
     var body: some View {
         let n = model.currentPage
+        Button("New PDF…", action: TabsModel.shared.showNewPDFPanel)
+        Divider()
         Group {
             Button("Save") { model.save() }
                 .disabled(!model.isDirty)
@@ -310,10 +312,11 @@ private struct DocumentMenu: View {
             }
             Divider()
             Button("Insert Blank Page After Page \(n)") { model.insertBlankPage(after: n) }
-            Button("Insert Pages from PDF After Page \(n)…") {
-                model.insertPDFs(after: n, message: "Choose the PDFs to insert")
+            Button("Insert PDFs or Images After Page \(n)…") {
+                model.insertFiles(after: n, message: "Choose the PDFs or images to insert")
             }
-            Button("Merge PDFs at End…", action: model.mergePDFs)
+            Button("Add PDFs or Images at End…", action: model.addFilesAtEnd)
+            Button("Add Image to Page \(n)…") { model.addImage(toPage: n) }
             Button("Delete Page \(n)") { model.deletePage(n) }
                 .disabled(model.pageCount <= 1)
             Divider()

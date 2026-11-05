@@ -297,12 +297,17 @@ ipcMain.handle("print", () => new Promise((resolve) => {
   win.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => resolve({ success, failureReason }));
 }));
 
-/** PDFs to insert into the current document. */
-ipcMain.handle("pick-pdfs", async (_event, title) => {
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "bmp", "webp"];
+
+/** PDFs and images for a new PDF or to insert; with `imagesOnly`, a single image for "Add Image to Page". */
+ipcMain.handle("pick-files", async (_event, { title, buttonLabel, imagesOnly = false }) => {
   const result = await dialog.showOpenDialog(win, {
     title,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-    properties: ["openFile", "multiSelections"],
+    buttonLabel,
+    filters: imagesOnly
+      ? [{ name: "Images", extensions: IMAGE_EXTENSIONS }]
+      : [{ name: "PDFs and Images", extensions: ["pdf", ...IMAGE_EXTENSIONS] }],
+    properties: imagesOnly ? ["openFile"] : ["openFile", "multiSelections"],
   });
   if (result.canceled) return [];
   return Promise.all(result.filePaths.map(async (file) => ({ name: path.basename(file), data: new Uint8Array(await fs.readFile(file)) })));
@@ -381,8 +386,9 @@ function updateAppMenu() {
   // Edits of the current page, in both the File and the Pages menu
   const pageEditItems = [
     item(`Insert Blank Page After Page ${page}`, "insertBlankPage", { enabled: edit }),
-    item(`Insert Pages from PDF After Page ${page}…`, "insertPDFs", { accelerator: "CmdOrCtrl+Shift+I", enabled: edit }),
-    item("Merge PDFs at End…", "mergePDFs", { enabled: edit }),
+    item(`Insert PDFs or Images After Page ${page}…`, "insertFiles", { accelerator: "CmdOrCtrl+Shift+I", enabled: edit }),
+    item("Add PDFs or Images at End…", "addFilesAtEnd", { enabled: edit }),
+    item(`Add Image to Page ${page}…`, "addImage", { enabled: edit }),
     separator,
     item(`Rotate Page ${page} Left`, "rotatePageLeft", { enabled: edit }),
     item(`Rotate Page ${page} Right`, "rotatePageRight", { enabled: edit }),
@@ -414,6 +420,7 @@ function updateAppMenu() {
     {
       label: "File",
       submenu: [
+        item("New PDF…", "newPDF", { accelerator: "CmdOrCtrl+N" }),
         item("Open…", "open", { accelerator: "CmdOrCtrl+O" }),
         { role: "recentDocuments", submenu: [{ role: "clearRecentDocuments" }] },
         item("Close Tab", "closeTab", { accelerator: "CmdOrCtrl+W" }),

@@ -13,6 +13,12 @@ final class DocumentTab: Identifiable {
     init(url: URL, document: PDFDocument) {
         self.model = PDFViewModel(document: document, url: url)
     }
+
+    /// A tab for "New PDF…"; the name is only a suggestion for the first "Save".
+    init(newDocument: PDFDocument, name: String) {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(name)
+        self.model = PDFViewModel(document: newDocument, url: url, isNew: true)
+    }
 }
 
 /// All open PDFs of the single app window, shown as tabs in the top bar.
@@ -41,7 +47,7 @@ final class TabsModel: ObservableObject {
     func open(_ urls: [URL]) {
         var failed: [String] = []
         for url in urls {
-            if let existing = tabs.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+            if let existing = tabs.first(where: { !$0.model.isNew && $0.url.standardizedFileURL == url.standardizedFileURL }) {
                 selectedID = existing.id
             } else if let document = PDFDocument(url: url) {
                 let tab = DocumentTab(url: url, document: document)
@@ -70,6 +76,38 @@ final class TabsModel: ObservableObject {
         if panel.runModal() == .OK {
             open(panel.urls)
         }
+    }
+
+    /// A new, unsaved PDF made of the chosen PDFs and images, in the order of their names.
+    func showNewPDFPanel() {
+        guard let urls = PDFViewModel.chooseFiles(message: "Choose the PDFs and images for the new PDF", prompt: "Create")
+        else { return }
+        let document = PDFDocument()
+        do {
+            try PDFViewModel.insertFiles(urls, into: document, at: 0)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = (error as? EditError)?.title ?? "The file can't be opened"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return
+        }
+        let tab = DocumentTab(newDocument: document, name: untitledName())
+        tabs.append(tab)
+        selectedID = tab.id
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// "Untitled.pdf", or "Untitled 2.pdf" and so on when that name is taken by another tab.
+    private func untitledName() -> String {
+        let names = Set(tabs.map(\.title))
+        var name = "Untitled.pdf"
+        var number = 2
+        while names.contains(name) {
+            name = "Untitled \(number).pdf"
+            number += 1
+        }
+        return name
     }
 
     // MARK: Tabs

@@ -41,7 +41,10 @@ private struct DocumentView: View {
                 Divider()
             }
             PDFKitView(pdfView: model.pdfView)
-                .overlay(alignment: .bottom) { ExportProgressBadge(model: model) }
+                .overlay(alignment: .bottom) {
+                    ExportProgressBadge(model: model)
+                    ImagePlacementBar(model: model)
+                }
         }
     }
 }
@@ -77,6 +80,28 @@ private struct ExportProgressBadge: View {
     }
 }
 
+/// "Add Image to Page": shown while the image is moved and resized.
+private struct ImagePlacementBar: View {
+    @ObservedObject var model: PDFViewModel
+
+    var body: some View {
+        if model.placingImage != nil, !model.isPresenting {
+            HStack(spacing: 10) {
+                Text("Drag the image to move it, or a corner to resize it.")
+                Button("Cancel", action: model.cancelImagePlacement)
+                    .keyboardShortcut(.cancelAction)
+                Button("Place Image", action: model.placeImage)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4, y: 1)
+            .padding(.bottom, 20)
+        }
+    }
+}
+
 private struct EmptyState: View {
     @EnvironmentObject private var tabs: TabsModel
 
@@ -89,9 +114,12 @@ private struct EmptyState: View {
                 .font(.title2.weight(.semibold))
             Text("Drag one or more PDFs here")
                 .foregroundStyle(.secondary)
-            Button("Open PDF…", action: tabs.showOpenPanel)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+            HStack(spacing: 10) {
+                Button("Open PDF…", action: tabs.showOpenPanel)
+                    .buttonStyle(.borderedProminent)
+                Button("New PDF…", action: tabs.showNewPDFPanel)
+            }
+            .controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

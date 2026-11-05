@@ -163,11 +163,12 @@ private struct PageEditItems: View {
         let n = model.currentPage
         Group {
             Button("Insert Blank Page After Page \(n)") { model.insertBlankPage(after: n) }
-            Button("Insert Pages from PDF After Page \(n)…") {
-                model.insertPDFs(after: n, message: "Choose the PDFs to insert")
+            Button("Insert PDFs or Images After Page \(n)…") {
+                model.insertFiles(after: n, message: "Choose the PDFs or images to insert")
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
-            Button("Merge PDFs at End…", action: model.mergePDFs)
+            Button("Add PDFs or Images at End…", action: model.addFilesAtEnd)
+            Button("Add Image to Page \(n)…") { model.addImage(toPage: n) }
             Divider()
             Button("Rotate Page \(n) Left") { model.rotatePage(n, by: -90) }
             Button("Rotate Page \(n) Right") { model.rotatePage(n, by: 90) }

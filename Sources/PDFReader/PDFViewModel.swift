@@ -79,6 +79,8 @@ final class PDFViewModel: ObservableObject {
     let pdfView = PDFView()
     /// Where the PDF is saved; changes with "Save As".
     @Published private(set) var url: URL
+    /// Made with "New PDF…" and not saved yet; "Save" asks where to save it.
+    @Published private(set) var isNew: Bool
 
     @Published var currentPage = 1
     @Published var pageCount = 0
@@ -91,6 +93,9 @@ final class PDFViewModel: ObservableObject {
     @Published private(set) var exportProgress: ExportProgress?
     /// The running work that the Cancel button of `exportProgress` stops.
     private var progressTask: Task<Void, Never>?
+    /// "Add Image to Page": the image being moved and resized, before it is placed.
+    @Published private(set) var placingImage: ImagePlacementView?
+    private var placementObservers: [NSObjectProtocol] = []
     /// Bumps on every change of the document's pages, so thumbnails redraw.
     @Published private(set) var revision = 0
     // Every edit gets a new version; the document is unsaved while it differs from the saved one
@@ -116,14 +121,17 @@ final class PDFViewModel: ObservableObject {
 
     var isDirty: Bool { version != savedVersion }
     var canUndo: Bool { !history.isEmpty && canEdit }
-    /// Edits wait while an export reads the document.
-    var canEdit: Bool { exportProgress == nil }
+    /// Edits wait while an export reads the document or an image is being placed.
+    var canEdit: Bool { exportProgress == nil && placingImage == nil }
     var baseName: String { url.deletingPathExtension().lastPathComponent }
     /// Full Screen Mode always shows single pages, whatever the layout.
     private var displayMode: PDFDisplayMode { isPresenting ? .singlePage : layout.displayMode }
 
-    init(document: PDFDocument, url: URL) {
+    init(document: PDFDocument, url: URL, isNew: Bool = false) {
         self.url = url
+        self.isNew = isNew
+        // A new PDF is unsaved from the start
+        if isNew { version = nextVersion; nextVersion += 1 }
         pdfView.document = document
         pdfView.autoScales = true
         pdfView.displayMode = layout.displayMode
@@ -166,7 +174,7 @@ final class PDFViewModel: ObservableObject {
     func firstPage() { turnPage { pdfView.goToFirstPage(nil) } }
     func lastPage() { turnPage { pdfView.goToLastPage(nil) } }
 
-    private func showPage(_ number: Int) {
+    func showPage(_ number: Int) {
         guard let doc = pdfView.document,
               let page = doc.page(at: min(max(number, 1), doc.pageCount) - 1) else { return }
         pdfView.go(to: page)
@@ -190,6 +198,7 @@ final class PDFViewModel: ObservableObject {
     /// the layout and zoom come back afterwards.
     func setPresenting(_ presenting: Bool) {
         guard presenting != isPresenting else { return }
+        if presenting { endPlacing() }
         let page = pdfView.currentPage
         if presenting {
             fitBeforePresenting = fitMode
@@ -491,7 +500,7 @@ final class PDFViewModel: ObservableObject {
     // MARK: Editing
 
     /// Encrypted PDFs can't be written back without losing their protection, so they stay read-only.
-    private func ensureEditable() -> Bool {
+    func ensureEditable() -> Bool {
         guard let doc = pdfView.document else { return false }
         if doc.isEncrypted || doc.isLocked || !doc.allowsDocumentChanges {
             showError(EditError.protected.title, EditError.protected.detail)
@@ -503,7 +512,7 @@ final class PDFViewModel: ObservableObject {
     /// Changes the document in place; the previous state goes on the undo stack.
     /// `pageAfter` is the page (1-based) to show afterwards. Returns false when nothing changed.
     @discardableResult
-    private func applyEdit(pageAfter: Int? = nil, _ change: (PDFDocument) throws -> Void) -> Bool {
+    func applyEdit(pageAfter: Int? = nil, _ change: (PDFDocument) throws -> Void) -> Bool {
         guard canEdit, ensureEditable(), let doc = pdfView.document else { return false }
         guard let before = doc.dataRepresentation() else {
             showError("Edit failed", "The PDF can't be read.")
@@ -586,37 +595,17 @@ final class PDFViewModel: ObservableObject {
         }
     }
 
-    /// Lets the user pick PDFs and inserts their pages after page `after` (0 = at the start).
-    func insertPDFs(after: Int, message: String) {
-        guard canEdit, ensureEditable() else { return }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.allowsMultipleSelection = true
-        panel.message = message
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-
+    /// Lets the user pick PDFs and images and inserts them after page `after` (0 = at the start).
+    /// Each image becomes a page of its own.
+    func insertFiles(after: Int, message: String) {
+        guard canEdit, ensureEditable(), let urls = Self.chooseFiles(message: message) else { return }
         applyEdit(pageAfter: after + 1) { doc in
-            var sources: [PDFDocument] = []
-            for url in panel.urls {
-                guard let source = PDFDocument(url: url) else {
-                    throw EditError(title: "The file can't be opened", detail: url.lastPathComponent)
-                }
-                if source.isLocked { throw EditError.protected }
-                sources.append(source)
-            }
-            var at = after
-            for source in sources {
-                for i in 0..<source.pageCount {
-                    guard let page = source.page(at: i)?.copy() as? PDFPage else { continue }
-                    doc.insert(page, at: at)
-                    at += 1
-                }
-            }
+            try Self.insertFiles(urls, into: doc, at: after)
         }
     }
 
-    func mergePDFs() {
-        insertPDFs(after: pageCount, message: "Choose the PDFs to merge")
+    func addFilesAtEnd() {
+        insertFiles(after: pageCount, message: "Choose the PDFs or images to add at the end")
     }
 
     /// Asks which pages to keep and saves them as a new PDF.
@@ -676,6 +665,7 @@ final class PDFViewModel: ObservableObject {
     /// Writes back to the file; returns false when it failed.
     @discardableResult
     func save() -> Bool {
+        if isNew { return saveAs() }
         guard isDirty else { return true }
         guard let data = pdfView.document?.dataRepresentation(), write(data, to: url) else { return false }
         savedVersion = version
@@ -689,6 +679,7 @@ final class PDFViewModel: ObservableObject {
               write(data, to: target)
         else { return false }
         url = target
+        isNew = false
         savedVersion = version
         NSDocumentController.shared.noteNewRecentDocumentURL(target)
         // The tab title shows the new name
@@ -897,6 +888,9 @@ final class PDFViewModel: ObservableObject {
     nonisolated private static let ocrLanguages = ["tr-TR", "fr-FR", "de-DE", "en-US"]
     /// Scanned pages are read at 300 DPI, but never larger than this many pixels on a side.
     nonisolated private static let ocrMaxSide: CGFloat = 6000
+    /// Vision skips lines of small text on a whole page (a bank statement lost its card numbers),
+    /// but finds them in parts of it, so each page is read in this many overlapping bands.
+    nonisolated private static let ocrBands = 5
 
     /// The pages with recognized text, as a PDF whose pages replace those at `indexes` (0-based).
     private struct RecognizedPages: Sendable {
@@ -945,15 +939,8 @@ final class PDFViewModel: ObservableObject {
             }
             let changed = applyEdit { doc in
                 for (i, index) in result.indexes.enumerated() {
-                    guard let old = doc.page(at: index), let new = recognized.page(at: i)?.copy() as? PDFPage else { continue }
-                    new.rotation = old.rotation
-                    // The new page has only the page content; links and notes move over
-                    for annotation in old.annotations {
-                        old.removeAnnotation(annotation)
-                        new.addAnnotation(annotation)
-                    }
-                    doc.removePage(at: index)
-                    doc.insert(new, at: index)
+                    guard let new = recognized.page(at: i)?.copy() as? PDFPage else { continue }
+                    Self.replacePage(at: index, in: doc, with: new)
                 }
             }
             if changed { showRecognized(pages: result.indexes.count, skipped: result.skipped) }
@@ -1029,17 +1016,48 @@ final class PDFViewModel: ObservableObject {
         context.drawPDFPage(pageRef)
         guard let image = context.makeImage() else { throw CocoaError(.fileReadUnknown) }
 
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        request.recognitionLanguages = ocrLanguages
-        try VNImageRequestHandler(cgImage: image).perform([request])
-        let lines = (request.results ?? []).compactMap { observation -> RecognizedLine? in
-            guard let text = observation.topCandidates(1).first?.string.trimmingCharacters(in: .whitespaces),
-                  !text.isEmpty else { return nil }
-            return RecognizedLine(text: text, rect: VNImageRectForNormalizedRect(observation.boundingBox, width, height))
+        let handler = VNImageRequestHandler(cgImage: image)
+        /// The lines Vision finds in `region` (normalized, origin at the bottom left), in pixels of the image.
+        func read(_ region: CGRect) throws -> [RecognizedLine] {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            request.recognitionLanguages = ocrLanguages
+            request.regionOfInterest = region
+            try handler.perform([request])
+            return (request.results ?? []).compactMap { observation in
+                guard let text = observation.topCandidates(1).first?.string.trimmingCharacters(in: .whitespaces),
+                      !text.isEmpty else { return nil }
+                // The box is relative to the region
+                let box = observation.boundingBox
+                let rect = CGRect(x: region.minX + box.minX * region.width, y: region.minY + box.minY * region.height,
+                                  width: box.width * region.width, height: box.height * region.height)
+                return RecognizedLine(text: text, rect: VNImageRectForNormalizedRect(rect, width, height))
+            }
+        }
+
+        // The bands overlap by half. Each keeps the lines whose middle is in its own share,
+        // so a line cut by the edge of one band comes whole from the next.
+        let step = 1 / CGFloat(ocrBands + 1)
+        var lines: [RecognizedLine] = []
+        for band in 0..<ocrBands {
+            let region = CGRect(x: 0, y: CGFloat(band) * step, width: 1, height: 2 * step)
+            let low = band == 0 ? -CGFloat.infinity : region.minY + step / 2
+            let high = band == ocrBands - 1 ? CGFloat.infinity : region.maxY - step / 2
+            lines += try read(region).filter { low..<high ~= $0.rect.midY / CGFloat(height) }
+        }
+        // Lines that no band found may still be found on the whole page
+        let found = lines
+        lines += try read(CGRect(x: 0, y: 0, width: 1, height: 1)).filter { line in
+            !found.contains { overlapsMostly($0.rect, line.rect) }
         }
         return (lines, toPixels)
+    }
+
+    /// True when the two boxes share more than a fifth of the smaller one.
+    nonisolated private static func overlapsMostly(_ a: CGRect, _ b: CGRect) -> Bool {
+        let common = a.intersection(b)
+        return !common.isNull && common.width * common.height > 0.2 * min(a.width * a.height, b.width * b.height)
     }
 
     /// Each line is stretched over the width Vision found for it, so selections match the scan.
@@ -1061,6 +1079,36 @@ final class PDFViewModel: ObservableObject {
             CTLineDraw(ctLine, context)
             context.restoreGState()
         }
+    }
+
+    // MARK: Add Image to Page
+
+    /// The image sits over the PDF view and follows its page when the view scrolls or zooms.
+    func startPlacing(_ placement: ImagePlacementView) {
+        placingImage = placement
+        pdfView.addSubview(placement)
+        let clipView = pdfView.documentView?.enclosingScrollView?.contentView
+        clipView?.postsBoundsChangedNotifications = true
+        let center = NotificationCenter.default
+        let update: @Sendable (Notification) -> Void = { [weak placement] _ in
+            MainActor.assumeIsolated { placement?.updateFrame() }
+        }
+        placementObservers = [
+            center.addObserver(forName: .PDFViewScaleChanged, object: pdfView, queue: .main, using: update),
+            center.addObserver(forName: .PDFViewDisplayModeChanged, object: pdfView, queue: .main, using: update),
+            center.addObserver(forName: .PDFViewPageChanged, object: pdfView, queue: .main, using: update),
+            center.addObserver(forName: NSView.frameDidChangeNotification, object: pdfView, queue: .main, using: update),
+            center.addObserver(forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main, using: update),
+        ]
+    }
+
+    /// Takes the image away again; `placeImage` draws it into the page for good.
+    func endPlacing() {
+        guard let placement = placingImage else { return }
+        placementObservers.forEach(NotificationCenter.default.removeObserver)
+        placementObservers = []
+        placement.removeFromSuperview()
+        placingImage = nil
     }
 
     // MARK: Search

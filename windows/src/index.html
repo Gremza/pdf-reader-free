@@ -79,12 +79,20 @@
       <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
       <h1>No PDF Open</h1>
       <p>Drag one or more PDFs here</p>
-      <button id="open-button" class="primary-button">Open PDF…</button>
+      <div class="empty-buttons">
+        <button id="open-button" class="primary-button">Open PDF…</button>
+        <button id="new-button" class="secondary-button">New PDF…</button>
+      </div>
     </section>
     <div id="export-progress" class="export-progress" role="status" hidden>
       <progress id="export-bar"></progress>
       <span id="export-label"></span>
       <button id="export-cancel" class="secondary-button" hidden>Cancel</button>
+    </div>
+    <div id="placement-bar" class="export-progress" role="status" hidden>
+      <span>Drag the image to move it, or a corner to resize it.</span>
+      <button id="placement-cancel" class="secondary-button">Cancel</button>
+      <button id="placement-place" class="primary-button">Place Image</button>
     </div>
     <div id="update-progress" class="export-progress update-progress" role="status" hidden>
       <progress id="update-bar" max="1"></progress>

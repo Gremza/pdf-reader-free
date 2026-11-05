@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld("host", {
   askReducedQuality: (titles) => ipcRenderer.invoke("ask-reduced-quality", titles),
   showReduced: (path, detail) => ipcRenderer.send("show-reduced", path, detail),
   print: () => ipcRenderer.invoke("print"),
-  pickPDFs: (title) => ipcRenderer.invoke("pick-pdfs", title),
+  pickFiles: (options) => ipcRenderer.invoke("pick-files", options),
   confirmCloseTab: (name) => ipcRenderer.invoke("confirm-close-tab", name),
   showError: (message, detail) => ipcRenderer.send("show-error", message, detail),
   showInfo: (message, detail) => ipcRenderer.send("show-info", message, detail),

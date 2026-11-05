@@ -79,9 +79,10 @@ struct ThumbnailSidebar: View {
         Button("Rotate Right") { model.rotatePage(number, by: 90) }
         Divider()
         Button("Insert Blank Page After This") { model.insertBlankPage(after: number) }
-        Button("Insert Pages from PDF After This…") {
-            model.insertPDFs(after: number, message: "Choose the PDFs to insert")
+        Button("Insert PDFs or Images After This…") {
+            model.insertFiles(after: number, message: "Choose the PDFs or images to insert")
         }
+        Button("Add Image to This Page…") { model.addImage(toPage: number) }
         Button("Save This Page as PDF…") { model.extractPagesPrompt(defaultValue: "\(number)") }
         Divider()
         Button("Delete Page") { model.deletePage(number) }
