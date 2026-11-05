@@ -292,6 +292,11 @@ ipcMain.on("show-reduced", async (_event, file, detail) => {
   if (response === 0) openPaths([file]);
 });
 
+/** The system print dialog for the page images the renderer laid out; resolves when the job is sent or cancelled. */
+ipcMain.handle("print", () => new Promise((resolve) => {
+  win.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => resolve({ success, failureReason }));
+}));
+
 /** PDFs to insert into the current document. */
 ipcMain.handle("pick-pdfs", async (_event, title) => {
   const result = await dialog.showOpenDialog(win, {
@@ -422,6 +427,8 @@ function updateAppMenu() {
         separator,
         item("Export to Word…", "exportWord", { enabled: edit }),
         item("Export as JPG…", "exportJPG", { accelerator: "CmdOrCtrl+E", enabled: edit }),
+        separator,
+        item("Print…", "print", { accelerator: "CmdOrCtrl+P", enabled: edit }),
       ],
     },
     {

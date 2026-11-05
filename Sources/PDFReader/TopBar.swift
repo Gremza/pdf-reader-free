@@ -326,6 +326,8 @@ private struct DocumentMenu: View {
             Divider()
             Button("Export to Word…", action: model.exportWord)
             Button("Export as JPG…", action: model.exportJPEG)
+            Divider()
+            Button("Print…", action: model.printDocument)
         }
         .disabled(!model.canEdit)
     }

@@ -46,6 +46,7 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
   - **Rotation:** "rotate all pages" (View menu) is a saved edit too, not just a view rotation.
   - **Protected PDFs:** encrypted, locked or restricted PDFs are refused by `ensureEditable()`.
   - **Exports** (`exportToFolder` for JPG and split, `exportWord`) read a **separate copy** of the document off the main thread through `ExportSource`: the saved file when the tab is clean, the current data when it is dirty. Edits are blocked while `exportProgress != nil` (`canEdit`).
+  - **Printing** (`printDocument`, ⌘P): `PDFDocument.printOperation` with scale-down-to-fit and auto-rotate, shown as a sheet with the full system print panel. It prints the document as it is now, unsaved edits included; PDFs that forbid printing are refused.
   - Saving writes atomically. `saveAs` changes `url` and refreshes `TabsModel.shared` so the tab title updates.
   - Page numbers in the API are 1-based, like the UI.
   - **Reduce File Size** (`reduceFileSize`): the system Quartz filter "Reduce File Size" with our own quality presets, applied through the `QuartzFilter` write option of `dataRepresentation(options:)` (undocumented; Preview uses it). It recompresses images by their drawn resolution and keeps links, outline and text. The copy is only offered when it is smaller.
@@ -66,6 +67,7 @@ A free PDF viewer and page editor with two apps that must stay feature-equal:
   - tabs, pdf.js viewer and thumbnails (drag to reorder)
   - `actions` (every command, used by buttons, shortcuts and menu actions); `syncMenu()` sends enabled/checked state to the main process
   - edits through `applyEdit`, with byte snapshots for undo
+  - Printing (`tab.print()`, Ctrl+P): every page is rendered at 200 DPI (`intent: "print"`) into `#print-container`, which the print CSS shows alone, one page per sheet, with `@page` sized like the first page; pages of the other orientation are turned counterclockwise. The main process opens the system dialog with `webContents.print` (`print` IPC) and the container is removed when the job is sent or cancelled.
   - Fade Between Pages: `turnPage` copies the visible page canvases onto a `.page-fade` layer and fades it out once the new page is drawn; the setting is in `localStorage`
   - Full Screen Mode: `startPresentation` / `endPresentation`, `tab.setPresenting`, `presentationKeys`; the main process enters and leaves full screen (`set-presenting`)
 - `updater.js`: the same update check in the main process. The installer build runs the downloaded setup with `--updated /S` when the app quits; the portable build swaps its own `.exe`. Settings are in `settings.json` under `userData`; the renderer shows them under the **Updates** button.

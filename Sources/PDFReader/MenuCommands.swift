@@ -34,6 +34,10 @@ struct DocumentCommands: Commands {
                 Button("Export as JPG…", action: model.exportJPEG)
                     .keyboardShortcut("e")
                     .disabled(!model.canEdit)
+                Divider()
+                Button("Print…", action: model.printDocument)
+                    .keyboardShortcut("p")
+                    .disabled(!model.canEdit)
             }
         }
 

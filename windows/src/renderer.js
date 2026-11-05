@@ -98,6 +98,7 @@ function writeSetting(key, value) {
 }
 
 const FADE_MS = 300;
+const PRINT_DPI = 200;
 
 // MARK: - Document tab
 
@@ -629,6 +630,94 @@ class DocumentTab {
     if (this === state.selected) updateExportProgress();
   }
 
+  // MARK: Printing
+
+  /**
+   * Prints the pages as they are now, unsaved edits included. Each page is drawn as an image
+   * at 200 DPI, like pdf.js prints, and the system print dialog chooses printer, pages and copies.
+   */
+  async print() {
+    if (!this.canEdit) return;
+    const permissions = await this.pdf.getPermissions();
+    if (permissions && !permissions.includes(pdfjsLib.PermissionFlag.PRINT)) {
+      window.host.showError("This PDF can't be printed", "Its author doesn't allow printing.");
+      return;
+    }
+    const container = document.createElement("div");
+    container.id = "print-container";
+    const style = document.createElement("style");
+    const urls = [];
+    let landscapeSheet = false;
+    this.startProgress("Preparing to print");
+    try {
+      for (let n = 1; n <= this.pageCount; n++) {
+        const page = await this.pdf.getPage(n);
+        const { width, height } = page.getViewport({ scale: 1 });
+        if (n === 1) {
+          // The paper size of the first page, like pdf.js; other sizes are scaled to fit
+          style.textContent = `@page { size: ${width}pt ${height}pt; margin: 0; }`;
+          landscapeSheet = width > height;
+        }
+        // Pages of the other orientation are turned counterclockwise to fill the sheet, like auto-rotate on macOS
+        const turn = width !== height && (width > height) !== landscapeSheet;
+        const url = await this.renderPrintPage(page, turn);
+        urls.push(url);
+        const sheet = document.createElement("div");
+        sheet.className = "print-page";
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        sheet.append(image);
+        container.append(sheet);
+        this.updateProgress(n);
+      }
+    } catch {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      window.host.showError("Printing failed", "The PDF can't be read.");
+      return;
+    } finally {
+      this.endProgress();
+    }
+    document.head.append(style);
+    document.body.append(container);
+    document.body.classList.add("printing");
+    // The title is the default name when printing to PDF
+    const title = document.title;
+    document.title = this.baseName;
+    try {
+      const { success, failureReason } = await window.host.print();
+      if (!success && failureReason !== "cancelled") window.host.showError("Printing failed", failureReason);
+    } finally {
+      document.title = title;
+      document.body.classList.remove("printing");
+      container.remove();
+      style.remove();
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    }
+  }
+
+  async renderPrintPage(page, turn) {
+    const viewport = page.getViewport({ scale: PRINT_DPI / 72, rotation: (page.rotate + (turn ? 270 : 0)) % 360 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    try {
+      await page.render({
+        canvas,
+        canvasContext: canvas.getContext("2d"),
+        viewport,
+        intent: "print",
+        annotationMode: pdfjsLib.AnnotationMode.ENABLE_STORAGE,
+        background: "#ffffff",
+      }).promise;
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error(`Page ${page.pageNumber} can't be printed`);
+      return URL.createObjectURL(blob);
+    } finally {
+      canvas.width = canvas.height = 0;
+    }
+  }
+
   /** Renders the page at 144 DPI on white. */
   async renderJPEG(pageNumber) {
     const page = await this.pdf.getPage(pageNumber);
@@ -1149,6 +1238,8 @@ function showDocumentMenu() {
     { type: "separator" },
     { id: "word", label: "Export to Word…", enabled },
     { id: "jpg", label: "Export as JPG…", accelerator: "Ctrl+E", enabled },
+    { type: "separator" },
+    { id: "print", label: "Print…", accelerator: "Ctrl+P", enabled },
   ], rect.left, rect.bottom + 4, {
     save: () => tab.save(),
     saveAs: () => tab.saveAs(),
@@ -1168,6 +1259,7 @@ function showDocumentMenu() {
     reduce: () => tab.reduceFileSize(),
     word: () => tab.exportWord(),
     jpg: () => tab.exportJPEG(),
+    print: () => tab.print(),
   });
 }
 
@@ -1332,6 +1424,7 @@ const actions = {
   splitPages: withTab((tab) => tab.splitPages()),
   reduceFileSize: withTab((tab) => tab.reduceFileSize()),
   exportWord: withTab((tab) => tab.exportWord()),
+  print: withTab((tab) => tab.print()),
   checkForUpdates: () => window.host.checkForUpdates(),
   toggleCheckForUpdates: () => window.host.setUpdateSetting("checkForUpdates", !state.updates.checkForUpdates),
   toggleInstallUpdates: () => window.host.setUpdateSetting("installUpdatesAutomatically", !state.updates.installUpdatesAutomatically),
@@ -1408,6 +1501,7 @@ const shortcuts = {
   "Ctrl+Shift+_": "rotateLeft",
   "Ctrl+Shift+-": "rotateLeft",
   "Ctrl+e": "exportJPG",
+  "Ctrl+p": "print",
   "Ctrl+s": "save",
   "Ctrl+Shift+s": "saveAs",
   "Ctrl+z": "undo",

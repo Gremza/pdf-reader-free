@@ -729,6 +729,34 @@ final class PDFViewModel: ObservableObject {
         }
     }
 
+    // MARK: Printing
+
+    /// Prints the pages as they are now, unsaved edits included, through the system print panel
+    /// (printer, pages, copies, paper size, orientation, scale, preview).
+    func printDocument() {
+        guard canEdit, let doc = pdfView.document else { return }
+        guard doc.allowsPrinting else {
+            showError("This PDF can't be printed", "Its author doesn't allow printing.")
+            return
+        }
+        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        info.isHorizontallyCentered = true
+        info.isVerticallyCentered = true
+        guard let operation = doc.printOperation(for: info, scalingMode: .pageScaleDownToFit, autoRotate: true) else {
+            showError("Printing failed", "The PDF can't be read.")
+            return
+        }
+        operation.jobTitle = baseName
+        operation.printPanel.options.formUnion([
+            .showsCopies, .showsPageRange, .showsPaperSize, .showsOrientation, .showsScaling, .showsPreview,
+        ])
+        if let window = pdfView.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
+    }
+
     // MARK: Reduce File Size
 
     /// The image quality of a reduced copy; the same presets as in the Windows app.

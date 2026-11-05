@@ -31,6 +31,7 @@
 - **Reduce File Size** — saves a smaller copy whose images are stored again as JPEG at high, medium or low quality (200, 144 or 96 dpi); the original stays unchanged
 - **Export to Word** (`.docx`) — the text of the PDF, with paragraphs, bold/italic and font sizes
 - **Export to JPG** — saves every page as an image (`1.jpg`, `2.jpg`, …) in a new folder named after the PDF
+- **Print** — the system print dialog with printer, pages, copies, paper size and orientation; prints unsaved edits too, and turns pages of the other orientation to fill the sheet
 - **Updates** — checks GitHub for a new version at launch and once a day; installs it automatically or asks first (*Check for Updates…*, *Check for Updates Automatically*, *Install Updates Automatically* in the app menu on macOS and the **Updates** button on Windows)
 - **Keyboard shortcuts like Adobe Acrobat Reader**, shown next to the menu items
 - On macOS every action is also in the menu bar (File, Edit, View, Pages)
@@ -62,6 +63,7 @@ The same as in Adobe Acrobat Reader.
 | Insert pages from PDF | `⌘⇧I` | `Ctrl+Shift+I` |
 | Delete page | `⌘⇧D` | `Ctrl+Shift+D` |
 | Export pages to JPG | `⌘E` | `Ctrl+E` |
+| Print | `⌘P` | `Ctrl+P` |
 | Save / Save As | `⌘S` / `⌘⇧S` | `Ctrl+S` / `Ctrl+Shift+S` |
 | Undo | `⌘Z` | `Ctrl+Z` |
 
