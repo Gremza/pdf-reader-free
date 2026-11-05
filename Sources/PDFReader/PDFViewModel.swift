@@ -134,9 +134,9 @@ final class PDFViewModel: ObservableObject {
             center.addObserver(forName: .PDFViewPageChanged, object: pdfView, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateCurrentPage() }
             },
-            // Keep "fit page" fitted while the window is resized
+            // Keep "fit page" and "fit width" fitted while the window is resized
             center.addObserver(forName: NSView.frameDidChangeNotification, object: pdfView, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { if self?.fitMode == .page { self?.applyFit() } }
+                MainActor.assumeIsolated { self?.applyFit() }
             },
         ]
     }
@@ -247,12 +247,19 @@ final class PDFViewModel: ObservableObject {
     }
 
     private func applyFit() {
+        let scale: CGFloat
         switch fitMode {
         case .custom:
-            break
+            return
         case .width:
-            // PDFView's autoscale fits the page width
-            pdfView.autoScales = true
+            // Not PDFView's autoScales: with single pages it fits the whole page, not the width.
+            // The document view is as wide as the widest row of pages with their margins, unscaled,
+            // and the scroll view's width leaves out a scroll bar that takes room.
+            pdfView.layoutDocumentView()
+            guard let documentView = pdfView.documentView,
+                  let scrollView = documentView.enclosingScrollView,
+                  documentView.frame.width > 0, scrollView.contentSize.width > 0 else { return }
+            scale = scrollView.contentSize.width / documentView.frame.width
         case .page:
             guard let page = pdfView.currentPage ?? pdfView.document?.page(at: 0) else { return }
             var size = page.bounds(for: pdfView.displayBox).size
@@ -261,9 +268,10 @@ final class PDFViewModel: ObservableObject {
             let margin: CGFloat = isPresenting ? 0 : 16
             let available = pdfView.bounds.insetBy(dx: margin, dy: margin).size
             guard size.width > 0, size.height > 0, available.width > 0, available.height > 0 else { return }
-            pdfView.autoScales = false
-            pdfView.scaleFactor = min(available.width / size.width, available.height / size.height)
+            scale = min(available.width / size.width, available.height / size.height)
         }
+        pdfView.autoScales = false
+        pdfView.scaleFactor = scale
     }
 
     // MARK: Rotation
