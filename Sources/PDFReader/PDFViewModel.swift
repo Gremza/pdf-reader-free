@@ -2,6 +2,7 @@ import SwiftUI
 import PDFKit
 import Quartz
 import UniformTypeIdentifiers
+import Vision
 
 enum FitMode {
     case width, page, custom
@@ -17,6 +18,8 @@ struct ExportProgress {
     var label: String
     var done: Int
     var total: Int
+    /// Shows a Cancel button, which cancels `PDFViewModel.progressTask`.
+    var canCancel = false
 }
 
 /// The document before an edit, for undo.
@@ -86,6 +89,8 @@ final class PDFViewModel: ObservableObject {
     @Published private(set) var isPresenting = false
     /// Pages done so far while exporting; nil when no export is running.
     @Published private(set) var exportProgress: ExportProgress?
+    /// The running work that the Cancel button of `exportProgress` stops.
+    private var progressTask: Task<Void, Never>?
     /// Bumps on every change of the document's pages, so thumbnails redraw.
     @Published private(set) var revision = 0
     // Every edit gets a new version; the document is unsaved while it differs from the saved one
@@ -441,22 +446,7 @@ final class PDFViewModel: ObservableObject {
 
         context.setFillColor(.white)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        context.scaleBy(x: scale, y: scale)
-        // Page rotation is clockwise; CoreGraphics angles are counterclockwise
-        switch rotation {
-        case 90:
-            context.translateBy(x: 0, y: box.width)
-            context.rotate(by: -.pi / 2)
-        case 180:
-            context.translateBy(x: box.width, y: box.height)
-            context.rotate(by: .pi)
-        case 270:
-            context.translateBy(x: box.height, y: 0)
-            context.rotate(by: .pi / 2)
-        default:
-            break
-        }
-        context.translateBy(x: -box.minX, y: -box.minY)
+        context.concatenate(displayTransform(box: box, rotation: rotation, scale: scale))
         // Rotation is applied above, so draw the page unrotated
         page.rotation = 0
         page.draw(with: .cropBox, to: context)
@@ -468,6 +458,23 @@ final class PDFViewModel: ObservableObject {
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
         return data as Data
+    }
+
+    /// Maps the page's user space to an image of the page as it is shown: upright and `scale` pixels per point.
+    nonisolated private static func displayTransform(box: CGRect, rotation: Int, scale: CGFloat) -> CGAffineTransform {
+        var transform = CGAffineTransform(scaleX: scale, y: scale)
+        // Page rotation is clockwise; CoreGraphics angles are counterclockwise
+        switch rotation {
+        case 90:
+            transform = transform.translatedBy(x: 0, y: box.width).rotated(by: -.pi / 2)
+        case 180:
+            transform = transform.translatedBy(x: box.width, y: box.height).rotated(by: .pi)
+        case 270:
+            transform = transform.translatedBy(x: box.height, y: 0).rotated(by: .pi / 2)
+        default:
+            break
+        }
+        return transform.translatedBy(x: -box.minX, y: -box.minY)
     }
 
     private func showExportError(_ error: Error) {
@@ -494,27 +501,29 @@ final class PDFViewModel: ObservableObject {
     }
 
     /// Changes the document in place; the previous state goes on the undo stack.
-    /// `pageAfter` is the page (1-based) to show afterwards.
-    private func applyEdit(pageAfter: Int? = nil, _ change: (PDFDocument) throws -> Void) {
-        guard canEdit, ensureEditable(), let doc = pdfView.document else { return }
+    /// `pageAfter` is the page (1-based) to show afterwards. Returns false when nothing changed.
+    @discardableResult
+    private func applyEdit(pageAfter: Int? = nil, _ change: (PDFDocument) throws -> Void) -> Bool {
+        guard canEdit, ensureEditable(), let doc = pdfView.document else { return false }
         guard let before = doc.dataRepresentation() else {
             showError("Edit failed", "The PDF can't be read.")
-            return
+            return false
         }
         do {
             try change(doc)
         } catch let error as EditError {
             showError(error.title, error.detail)
-            return
+            return false
         } catch {
             showError("Edit failed", error.localizedDescription)
-            return
+            return false
         }
         history.append(Snapshot(data: before, version: version))
         if history.count > Self.undoLimit { history.removeFirst() }
         version = nextVersion
         nextVersion += 1
         documentChanged(page: pageAfter ?? currentPage)
+        return true
     }
 
     func undo() {
@@ -880,6 +889,178 @@ final class PDFViewModel: ObservableObject {
         bytes < 1_000_000
             ? "\(max(1, Int((Double(bytes) / 1000).rounded()))) KB"
             : String(format: "%.1f MB", Double(bytes) / 1_000_000)
+    }
+
+    // MARK: Recognize Text
+
+    /// Vision has no Albanian; with these languages and without language correction it keeps ë and ç.
+    nonisolated private static let ocrLanguages = ["tr-TR", "fr-FR", "de-DE", "en-US"]
+    /// Scanned pages are read at 300 DPI, but never larger than this many pixels on a side.
+    nonisolated private static let ocrMaxSide: CGFloat = 6000
+
+    /// The pages with recognized text, as a PDF whose pages replace those at `indexes` (0-based).
+    private struct RecognizedPages: Sendable {
+        var data = Data()
+        var indexes: [Int] = []
+        /// Pages that already had text.
+        var skipped = 0
+    }
+
+    /// A line of text found on the page image, in its pixels.
+    private struct RecognizedLine {
+        let text: String
+        let rect: CGRect
+    }
+
+    func cancelProgress() {
+        progressTask?.cancel()
+    }
+
+    /// Finds the text of scanned pages with Vision and adds it as an invisible layer over each page,
+    /// so it can be searched and copied. Pages that already have text are skipped.
+    func recognizeText() {
+        guard canEdit, ensureEditable(), let source = exportSource() else { return }
+        let total = pageCount
+        exportProgress = ExportProgress(label: "Recognizing text", done: 0, total: total, canCancel: true)
+
+        progressTask = Task { [weak self] in
+            let result = await Self.recognizeText(in: source) { done in
+                self?.exportProgress?.done = done
+            }
+            guard let self else { return }
+            exportProgress = nil
+            progressTask = nil
+            if Task.isCancelled { return }
+            guard let result, let recognized = PDFDocument(data: result.data) else {
+                showError("Recognizing text failed", "The PDF can't be read.")
+                return
+            }
+            if result.skipped == total {
+                showError("This PDF already has text", "Every page already has text that can be searched and copied.")
+                return
+            }
+            guard !result.indexes.isEmpty else {
+                showError("No text was found", "The pages may be blank, or the text may be too small or unclear to read.")
+                return
+            }
+            let changed = applyEdit { doc in
+                for (i, index) in result.indexes.enumerated() {
+                    guard let old = doc.page(at: index), let new = recognized.page(at: i)?.copy() as? PDFPage else { continue }
+                    new.rotation = old.rotation
+                    // The new page has only the page content; links and notes move over
+                    for annotation in old.annotations {
+                        old.removeAnnotation(annotation)
+                        new.addAnnotation(annotation)
+                    }
+                    doc.removePage(at: index)
+                    doc.insert(new, at: index)
+                }
+            }
+            if changed { showRecognized(pages: result.indexes.count, skipped: result.skipped) }
+        }
+    }
+
+    private func showRecognized(pages: Int, skipped: Int) {
+        let alert = NSAlert()
+        alert.messageText = "Text recognized"
+        alert.informativeText = "The text of \(pages == 1 ? "1 page" : "\(pages) pages") can now be searched and copied. " +
+            (skipped == 0 ? "" : "Pages that already had text were skipped. ") +
+            "Save the PDF to keep it."
+        alert.runModal()
+    }
+
+    /// Reads a copy of the document off the main thread; returns nil when it can't be read or was cancelled.
+    /// Each page with text found is drawn again into a new PDF, with that text over it in invisible ink.
+    nonisolated private static func recognizeText(
+        in source: ExportSource, progress: @escaping @MainActor @Sendable (Int) -> Void
+    ) async -> RecognizedPages? {
+        guard let doc = source.open() else { return nil }
+        let data = NSMutableData()
+        guard let consumer = CGDataConsumer(data: data), let context = CGContext(consumer: consumer, mediaBox: nil, nil)
+        else { return nil }
+
+        var result = RecognizedPages()
+        for index in 0..<doc.pageCount {
+            if Task.isCancelled { return nil }
+            guard let page = doc.page(at: index), let pageRef = page.pageRef else { continue }
+            if page.string?.contains(where: { !$0.isWhitespace }) == true {
+                result.skipped += 1
+            } else if let (lines, toPixels) = try? recognizedLines(on: page, pageRef), !lines.isEmpty {
+                var mediaBox = page.bounds(for: .mediaBox)
+                var cropBox = page.bounds(for: .cropBox)
+                let boxes = [
+                    kCGPDFContextMediaBox: Data(bytes: &mediaBox, count: MemoryLayout<CGRect>.size),
+                    kCGPDFContextCropBox: Data(bytes: &cropBox, count: MemoryLayout<CGRect>.size),
+                ] as CFDictionary
+                context.beginPDFPage(boxes)
+                context.drawPDFPage(pageRef)
+                context.concatenate(toPixels.inverted())
+                drawInvisible(lines, in: context)
+                context.endPDFPage()
+                result.indexes.append(index)
+            }
+            await progress(index + 1)
+        }
+        context.closePDF()
+        result.data = data as Data
+        return result
+    }
+
+    /// Draws the page upright, like it is shown, and reads its lines of text with Vision.
+    /// Also returns the transform from the page's user space to the pixels of that image.
+    nonisolated private static func recognizedLines(
+        on page: PDFPage, _ pageRef: CGPDFPage
+    ) throws -> ([RecognizedLine], CGAffineTransform) {
+        let box = page.bounds(for: .cropBox)
+        let rotation = (page.rotation % 360 + 360) % 360
+        var size = box.size
+        if rotation % 180 != 0 { size = CGSize(width: size.height, height: size.width) }
+        let scale = min(300.0 / 72, ocrMaxSide / max(size.width, size.height, 1))
+        let width = Int((size.width * scale).rounded()), height = Int((size.height * scale).rounded())
+
+        guard width > 0, height > 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+        else { throw CocoaError(.fileReadUnknown) }
+        context.setFillColor(.white)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let toPixels = displayTransform(box: box, rotation: rotation, scale: scale)
+        context.concatenate(toPixels)
+        context.drawPDFPage(pageRef)
+        guard let image = context.makeImage() else { throw CocoaError(.fileReadUnknown) }
+
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.recognitionLanguages = ocrLanguages
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        let lines = (request.results ?? []).compactMap { observation -> RecognizedLine? in
+            guard let text = observation.topCandidates(1).first?.string.trimmingCharacters(in: .whitespaces),
+                  !text.isEmpty else { return nil }
+            return RecognizedLine(text: text, rect: VNImageRectForNormalizedRect(observation.boundingBox, width, height))
+        }
+        return (lines, toPixels)
+    }
+
+    /// Each line is stretched over the width Vision found for it, so selections match the scan.
+    nonisolated private static func drawInvisible(_ lines: [RecognizedLine], in context: CGContext) {
+        context.setTextDrawingMode(.invisible)
+        context.textMatrix = .identity
+        let base = CTFontCreateWithName("Helvetica" as CFString, 1, nil)
+        let ascent = CTFontGetAscent(base), descent = CTFontGetDescent(base)
+        for line in lines {
+            let size = line.rect.height / (ascent + descent)
+            let font = CTFontCreateCopyWithAttributes(base, size, nil, nil)
+            let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: line.text, attributes: [.font: font]))
+            let width = CTLineGetTypographicBounds(ctLine, nil, nil, nil)
+            guard width > 0 else { continue }
+            context.saveGState()
+            context.translateBy(x: line.rect.minX, y: line.rect.minY + descent * size)
+            context.scaleBy(x: line.rect.width / width, y: 1)
+            context.textPosition = .zero
+            CTLineDraw(ctLine, context)
+            context.restoreGState()
+        }
     }
 
     // MARK: Search

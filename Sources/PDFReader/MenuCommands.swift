@@ -28,6 +28,8 @@ struct DocumentCommands: Commands {
                     .disabled(!model.canEdit)
                 Button("Reduce File Size…", action: model.reduceFileSize)
                     .disabled(!model.canEdit)
+                Button("Recognize Text", action: model.recognizeText)
+                    .disabled(!model.canEdit)
                 Divider()
                 Button("Export to Word…", action: model.exportWord)
                     .disabled(!model.canEdit)

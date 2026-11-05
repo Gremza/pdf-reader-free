@@ -325,6 +325,10 @@ ipcMain.on("show-error", (_event, message, detail) => {
   dialog.showMessageBox(win, { type: "warning", message, detail });
 });
 
+ipcMain.on("show-info", (_event, message, detail) => {
+  dialog.showMessageBox(win, { type: "info", message, detail });
+});
+
 ipcMain.on("set-dirty-count", (_event, count) => {
   dirtyCount = count;
 });
@@ -424,6 +428,7 @@ function updateAppMenu() {
         item("Extract Pages to New PDF…", "extractPages", { enabled: edit }),
         item("Split into Single Pages…", "splitPages", { enabled: edit }),
         item("Reduce File Size…", "reduceFileSize", { enabled: edit }),
+        item("Recognize Text", "recognizeText", { enabled: edit }),
         separator,
         item("Export to Word…", "exportWord", { enabled: edit }),
         item("Export as JPG…", "exportJPG", { accelerator: "CmdOrCtrl+E", enabled: edit }),

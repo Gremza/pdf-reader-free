@@ -63,6 +63,10 @@ private struct ExportProgressBadge: View {
                         .frame(width: 120)
                     Text("\(progress.label)…")
                 }
+                if progress.canCancel {
+                    Button("Cancel", action: model.cancelProgress)
+                        .controlSize(.small)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

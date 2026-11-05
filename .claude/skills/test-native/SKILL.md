@@ -28,7 +28,9 @@ swift build
 APP=$S/PDFTest.app; rm -rf $APP; mkdir -p $APP/Contents/MacOS
 cp .build/debug/PDFReader $APP/Contents/MacOS/; cp Resources/Info.plist $APP/Contents/
 codesign --force --sign - $APP; cp some.pdf $S/ui.pdf; open -a $APP $S/ui.pdf
-P='tell application "System Events" to tell (first process whose name is "PDFReader")'
+# The installed app's process is also called "PDFReader": address the test app by its pid
+PID=$(pgrep -f PDFTest.app/Contents/MacOS/PDFReader)
+P="tell application \"System Events\" to tell (first process whose unix id is $PID)"
 osascript -e "$P to get {name, enabled} of menu items of menu 1 of menu bar item \"Pages\" of menu bar 1"
 osascript -e "$P to click menu item \"Delete Page 1\" of menu 1 of menu bar item \"Pages\" of menu bar 1"
 osascript -e "$P to get value of attribute \"AXMenuItemMarkChar\" of menu items of menu 1 of menu bar item \"View\" of menu bar 1"

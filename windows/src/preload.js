@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("host", {
   pickPDFs: (title) => ipcRenderer.invoke("pick-pdfs", title),
   confirmCloseTab: (name) => ipcRenderer.invoke("confirm-close-tab", name),
   showError: (message, detail) => ipcRenderer.send("show-error", message, detail),
+  showInfo: (message, detail) => ipcRenderer.send("show-info", message, detail),
   setDirtyCount: (count) => ipcRenderer.send("set-dirty-count", count),
   popupMenu: (items, x, y) => ipcRenderer.invoke("popup-menu", items, x, y),
   closeWindow: () => ipcRenderer.send("close-window"),

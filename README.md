@@ -29,6 +29,7 @@
 - **Save / Save As** — changes are only written when you save; unsaved tabs show `●` and ask before closing
 - **Extract pages** (e.g. `1-3, 5`) into a new PDF, or **split** every page into its own PDF
 - **Reduce File Size** — saves a smaller copy whose images are stored again as JPEG at high, medium or low quality (200, 144 or 96 dpi); the original stays unchanged
+- **Recognize Text** (OCR) — makes scanned pages searchable: the text found on each page is added as an invisible layer over it, so it can be searched and copied; pages that already have text are skipped. It works offline, with Apple's Vision on macOS and [Tesseract](https://github.com/naptha/tesseract.js) (English and Albanian) on Windows
 - **Export to Word** (`.docx`) — the text of the PDF, with paragraphs, bold/italic and font sizes
 - **Export to JPG** — saves every page as an image (`1.jpg`, `2.jpg`, …) in a new folder named after the PDF
 - **Print** — the system print dialog with printer, pages, copies, paper size and orientation; prints unsaved edits too, and turns pages of the other orientation to fill the sheet
@@ -133,6 +134,7 @@ windows/src/
   renderer.js          Tabs, navigation, zoom, layouts, rotation, search, thumbnails
   editing.js           Page edits with pdf-lib
   reduce.js            Reduce File Size: images recompressed as JPEG
+  ocr.js               Recognize Text with Tesseract (models in tessdata/)
   styles.css           Light / dark theme
 ```
 

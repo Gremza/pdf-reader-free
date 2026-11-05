@@ -1,7 +1,7 @@
 {
   "name": "pdf-reader-free",
   "productName": "PDF Gremza",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "A simple, fast and free PDF viewer",
   "author": "Marsel Preci",
   "license": "MIT",
@@ -9,7 +9,8 @@
   "main": "src/main.js",
   "dependencies": {
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^6.4.299"
+    "pdfjs-dist": "^6.4.299",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "electron": "^44.9.0",
@@ -36,7 +37,10 @@
       "!node_modules/pdfjs-dist/build/*.min.mjs",
       "!node_modules/pdfjs-dist/build/pdf.sandbox*",
       "!node_modules/pdfjs-dist/webpack.mjs",
-      "!node_modules/@napi-rs/**"
+      "!node_modules/@napi-rs/**",
+      "!node_modules/tesseract.js/{src,docs,scripts}/**",
+      "!node_modules/tesseract.js-core/tesseract-core{,-lstm,-simd,-relaxedsimd,-relaxedsimd-lstm}.{js,wasm,wasm.js}",
+      "!node_modules/tesseract.js-core/tesseract-core-simd-lstm.{js,wasm}"
     ],
     "fileAssociations": [
       {

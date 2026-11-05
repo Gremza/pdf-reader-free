@@ -23,3 +23,4 @@ Read `CLAUDE.md` first. A feature is done only when it exists in **both** apps w
 - Update the README feature list and shortcut table.
 - Test the macOS side with the `test-native` skill; run `npm start` in `windows/` and exercise the feature.
 - Optionally run the `parity-checker` and `ui-text-reviewer` agents.
+- **Publish without asking.** When the feature works and its tests pass, go straight on to the `release` skill and publish a new version. The owner asked not to be asked "shall I publish?" after each feature.

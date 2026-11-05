@@ -2,6 +2,7 @@ import * as pdfjsLib from "../node_modules/pdfjs-dist/build/pdf.mjs";
 import { ProtectedPDFError, assertEditable, extractPages, pageEdits, parsePageRanges } from "./editing.js";
 import { extractDocument, hasText } from "./word.js";
 import { REDUCED_QUALITIES, reduceImages } from "./reduce.js";
+import { CancelledError, recognizeText } from "./ocr.js";
 
 // pdf_viewer.mjs reads the core library from this global
 globalThis.pdfjsLib = pdfjsLib;
@@ -51,6 +52,7 @@ const el = {
   exportProgress: $("export-progress"),
   exportBar: $("export-bar"),
   exportLabel: $("export-label"),
+  exportCancel: $("export-cancel"),
   documentButton: $("document-button"),
   promptDialog: $("prompt-dialog"),
   promptField: $("prompt-field"),
@@ -191,6 +193,8 @@ class DocumentTab {
   get baseName() { return this.name.replace(/\.pdf$/i, ""); }
 
   destroy() {
+    // A running "Recognize Text" stops without a message
+    if (this.exportProgress?.cancellable) this.exportProgress.cancelled = true;
     this.thumbnailObserver?.disconnect();
     this.viewer.setDocument(null);
     this.linkService.setDocument(null);
@@ -354,17 +358,22 @@ class DocumentTab {
 
   get canEdit() { return !this.busy && !this.exportProgress; }
 
-  /** Runs a page operation on the PDF bytes and shows the result; the previous bytes go on the undo stack. */
+  /**
+   * Runs a page operation on the PDF bytes and shows the result; the previous bytes go on the undo stack.
+   * Resolves to false when nothing changed.
+   */
   async applyEdit(edit, pageAfter = this.currentPage) {
-    if (!this.canEdit) return;
+    if (!this.canEdit) return false;
     this.busy = true;
     try {
       const bytes = await edit(this.bytes);
       this.history.push(this.bytes);
       if (this.history.length > UNDO_LIMIT) this.history.shift();
       await this.show(bytes, pageAfter);
+      return true;
     } catch (error) {
       showEditError(error);
+      return false;
     } finally {
       this.busy = false;
     }
@@ -513,6 +522,45 @@ class DocumentTab {
     window.host.showReduced(path, `Reduced from ${formatSize(original.length)} to ${formatSize(reduced.length)} (${percent}% smaller).`);
   }
 
+  /**
+   * Finds the text of scanned pages with Tesseract and adds it as an invisible layer over each page,
+   * so it can be searched and copied. Pages that already have text are skipped.
+   */
+  async recognizeText() {
+    if (!this.canEdit) return;
+    try {
+      await assertEditable(this.bytes);
+    } catch (error) {
+      showEditError(error);
+      return;
+    }
+    const progress = this.startProgress("Recognizing text", { cancellable: true });
+    let result;
+    try {
+      result = await recognizeText(this.bytes, this.pdf, (n) => this.updateProgress(n), () => progress.cancelled);
+    } catch (error) {
+      if (!(error instanceof CancelledError) && !progress.cancelled) window.host.showError("Recognizing text failed", "The PDF can't be read.");
+      return;
+    } finally {
+      this.endProgress();
+    }
+    if (progress.cancelled) return;
+    const { bytes, pages, skipped } = result;
+    if (skipped === this.pageCount) {
+      window.host.showError("This PDF already has text", "Every page already has text that can be searched and copied.");
+      return;
+    }
+    if (!pages) {
+      window.host.showError("No text was found", "The pages may be blank, or the text may be too small or unclear to read.");
+      return;
+    }
+    if (!(await this.applyEdit(() => bytes))) return;
+    window.host.showInfo("Text recognized",
+      `The text of ${pages === 1 ? "1 page" : `${pages} pages`} can now be searched and copied. ` +
+      (skipped ? "Pages that already had text were skipped. " : "") +
+      "Save the PDF to keep it.");
+  }
+
   /** Writes back to the file; returns false when it failed. */
   async save() {
     if (!this.isDirty) return true;
@@ -615,9 +663,11 @@ class DocumentTab {
     }
   }
 
-  startProgress(label) {
-    this.exportProgress = { label, done: 0, total: this.pageCount };
+  /** `cancellable` shows a Cancel button, which sets `cancelled` on the returned progress. */
+  startProgress(label, { cancellable = false } = {}) {
+    this.exportProgress = { label, done: 0, total: this.pageCount, cancellable, cancelled: false };
     if (this === state.selected) updateExportProgress();
+    return this.exportProgress;
   }
 
   updateProgress(done) {
@@ -1147,6 +1197,8 @@ function updateExportProgress() {
   el.exportBar.max = Math.max(progress.total, 1);
   el.exportBar.value = progress.done;
   el.exportLabel.textContent = `${progress.label} ${progress.done} / ${progress.total}…`;
+  el.exportCancel.hidden = !progress.cancellable;
+  el.exportCancel.disabled = progress.cancelled;
 }
 
 function updateSearchCount() {
@@ -1235,6 +1287,7 @@ function showDocumentMenu() {
     { id: "extract", label: "Extract Pages to New PDF…", enabled },
     { id: "split", label: "Split into Single Pages…", enabled },
     { id: "reduce", label: "Reduce File Size…", enabled },
+    { id: "recognize", label: "Recognize Text", enabled },
     { type: "separator" },
     { id: "word", label: "Export to Word…", enabled },
     { id: "jpg", label: "Export as JPG…", accelerator: "Ctrl+E", enabled },
@@ -1257,6 +1310,7 @@ function showDocumentMenu() {
     extract: () => tab.extractPagesPrompt(),
     split: () => tab.splitPages(),
     reduce: () => tab.reduceFileSize(),
+    recognize: () => tab.recognizeText(),
     word: () => tab.exportWord(),
     jpg: () => tab.exportJPEG(),
     print: () => tab.print(),
@@ -1423,6 +1477,7 @@ const actions = {
   extractPages: withTab((tab) => tab.extractPagesPrompt()),
   splitPages: withTab((tab) => tab.splitPages()),
   reduceFileSize: withTab((tab) => tab.reduceFileSize()),
+  recognizeText: withTab((tab) => tab.recognizeText()),
   exportWord: withTab((tab) => tab.exportWord()),
   print: withTab((tab) => tab.print()),
   checkForUpdates: () => window.host.checkForUpdates(),
@@ -1431,6 +1486,11 @@ const actions = {
 };
 
 el.openButton.addEventListener("click", actions.open);
+el.exportCancel.addEventListener("click", () => {
+  const progress = state.selected?.exportProgress;
+  if (progress?.cancellable) progress.cancelled = true;
+  updateExportProgress();
+});
 el.addTab.addEventListener("click", actions.open);
 el.toggleThumbs.addEventListener("click", actions.toggleThumbnails);
 el.prevPage.addEventListener("click", actions.previousPage);

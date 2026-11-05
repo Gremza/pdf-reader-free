@@ -323,6 +323,7 @@ private struct DocumentMenu: View {
             Button("Extract Pages to New PDF…") { model.extractPagesPrompt() }
             Button("Split into Single Pages…", action: model.splitPages)
             Button("Reduce File Size…", action: model.reduceFileSize)
+            Button("Recognize Text", action: model.recognizeText)
             Divider()
             Button("Export to Word…", action: model.exportWord)
             Button("Export as JPG…", action: model.exportJPEG)
