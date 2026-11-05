@@ -473,6 +473,17 @@ body.hide-cursor, body.hide-cursor * { cursor: none !important; }
 }
 
 .export-progress[hidden] { display: none; }
+.snapshot-bar svg { width: 18px; height: 18px; }
+
+/* Take a Snapshot: a crosshair over the pages, and the part being dragged out */
+.snapshot-layer { position: absolute; inset: 0; z-index: 40; cursor: crosshair; }
+.snapshot-selection {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  pointer-events: none;
+}
+.snapshot-selection[hidden] { display: none; }
 .update-progress { bottom: 70px; }
 #updates-button { margin-left: auto; }
 .export-progress progress { width: 120px; accent-color: var(--accent); }

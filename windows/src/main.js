@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell, systemPreferences } = require("electron");
+const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, shell, systemPreferences } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -233,12 +233,14 @@ async function writeFileSafely(file, data) {
   }
 }
 
-function saveFilters(kind) {
-  return kind === "docx" ? [{ name: "Word Document", extensions: ["docx"] }] : [{ name: "PDF", extensions: ["pdf"] }];
-}
+const SAVE_FILTERS = {
+  pdf: [{ name: "PDF", extensions: ["pdf"] }],
+  docx: [{ name: "Word Document", extensions: ["docx"] }],
+  jpg: [{ name: "JPEG Image", extensions: ["jpg", "jpeg"] }],
+};
 
 async function askSavePath(defaultName, kind, title) {
-  const result = await dialog.showSaveDialog(win, { title, defaultPath: defaultName, filters: saveFilters(kind) });
+  const result = await dialog.showSaveDialog(win, { title, defaultPath: defaultName, filters: SAVE_FILTERS[kind] });
   return result.canceled ? null : result.filePath;
 }
 
@@ -254,6 +256,16 @@ ipcMain.handle("save-as", async (_event, defaultName, data, title) => {
   await writeFileSafely(file, data);
   writablePaths.add(file);
   app.addRecentDocument(file);
+  return file;
+});
+
+/** "Take a Snapshot": copies the JPG to the clipboard, like Acrobat, and offers to save it. Returns the path, or null when cancelled. */
+ipcMain.handle("save-snapshot", async (_event, defaultName, data) => {
+  const png = nativeImage.createFromBuffer(Buffer.from(data)).toPNG();
+  await clipboard.write([new ClipboardItem({ "image/png": new Blob([png], { type: "image/png" }) })]);
+  const file = await askSavePath(defaultName, "jpg", "Save Snapshot as JPG");
+  if (!file) return null;
+  await writeFileSafely(file, data);
   return file;
 });
 
@@ -338,6 +350,18 @@ ipcMain.on("set-dirty-count", (_event, count) => {
   dirtyCount = count;
 });
 
+const menuIcons = new Map();
+
+/** A menu item icon from src/icons (camera.png and camera@2x.png); on macOS a template that follows dark menus. */
+function menuIcon(name) {
+  if (!menuIcons.has(name)) {
+    const image = nativeImage.createFromPath(path.join(__dirname, "icons", `${name}.png`));
+    if (process.platform === "darwin") image.setTemplateImage(true);
+    menuIcons.set(name, image);
+  }
+  return menuIcons.get(name);
+}
+
 /** Shows a native menu at (x, y) and resolves with the id of the chosen item, or null. */
 ipcMain.handle("popup-menu", (_event, items, x, y) => new Promise((resolve) => {
   const build = (item) => item.type === "separator"
@@ -348,6 +372,7 @@ ipcMain.handle("popup-menu", (_event, items, x, y) => new Promise((resolve) => {
         checked: item.checked,
         enabled: item.enabled !== false,
         accelerator: item.accelerator,
+        icon: item.icon && menuIcon(item.icon),
         registerAccelerator: false,
         click: () => resolve(item.id),
       };
@@ -453,6 +478,8 @@ function updateAppMenu() {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" },
+        separator,
+        item("Take a Snapshot", "takeSnapshot", { icon: menuIcon("camera"), enabled: doc && (s.canEdit || s.takingSnapshot) && !s.presenting }),
         separator,
         item("Search", "focusSearch", { accelerator: "CmdOrCtrl+F", enabled: doc && !s.presenting }),
         item("Find Next", "findNext", { accelerator: "CmdOrCtrl+G", enabled: doc }),

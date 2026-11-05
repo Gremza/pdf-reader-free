@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("host", {
   exportFinished: (folder, error) => ipcRenderer.send("export-finished", folder, error),
   saveFile: (path, data) => ipcRenderer.invoke("save-file", path, data),
   saveAs: (defaultName, data, title) => ipcRenderer.invoke("save-as", defaultName, data, title),
+  saveSnapshot: (defaultName, data) => ipcRenderer.invoke("save-snapshot", defaultName, data),
   exportDocx: (defaultName, document) => ipcRenderer.invoke("export-docx", defaultName, document),
   askReducedQuality: (titles) => ipcRenderer.invoke("ask-reduced-quality", titles),
   showReduced: (path, detail) => ipcRenderer.send("show-reduced", path, detail),

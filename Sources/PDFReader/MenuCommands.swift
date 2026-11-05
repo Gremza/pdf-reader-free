@@ -65,6 +65,12 @@ struct DocumentCommands: Commands {
         CommandGroup(after: .pasteboard) {
             DocumentMenuItems(tabs: tabs) { model in
                 Divider()
+                Button(action: model.takeSnapshot) {
+                    Label("Take a Snapshot", systemImage: "camera")
+                }
+                .labelStyle(.titleAndIcon)
+                .disabled((!model.canEdit && !model.isTakingSnapshot) || model.isPresenting)
+                Divider()
                 Button("Search") { model.focusRequest = .search }
                     .keyboardShortcut("f")
                     .disabled(model.isPresenting)

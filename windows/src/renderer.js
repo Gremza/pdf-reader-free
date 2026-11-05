@@ -6,6 +6,7 @@ import { readImage } from "./images.js";
 import { extractDocument, hasText } from "./word.js";
 import { REDUCED_QUALITIES, reduceImages } from "./reduce.js";
 import { CancelledError, recognizeText } from "./ocr.js";
+import { renderSnapshot, startSnapshot } from "./snapshot.js";
 
 // pdf_viewer.mjs reads the core library from this global
 globalThis.pdfjsLib = pdfjsLib;
@@ -59,6 +60,8 @@ const el = {
   placementBar: $("placement-bar"),
   placementCancel: $("placement-cancel"),
   placementPlace: $("placement-place"),
+  snapshotBar: $("snapshot-bar"),
+  snapshotCancel: $("snapshot-cancel"),
   documentButton: $("document-button"),
   promptDialog: $("prompt-dialog"),
   promptField: $("prompt-field"),
@@ -207,6 +210,7 @@ class DocumentTab {
     this.endPlacing();
     // A running "Recognize Text" stops without a message
     if (this.exportProgress?.cancellable) this.exportProgress.cancelled = true;
+    this.endSnapshot();
     this.thumbnailObserver?.disconnect();
     this.viewer.setDocument(null);
     this.linkService.setDocument(null);
@@ -368,8 +372,8 @@ class DocumentTab {
 
   // MARK: Editing
 
-  /** Edits wait while an export reads the document or an image is being placed. */
-  get canEdit() { return !this.busy && !this.exportProgress && !this.placement; }
+  /** Edits wait while an export reads the document, an image is being placed or a snapshot is being taken. */
+  get canEdit() { return !this.busy && !this.exportProgress && !this.placement && !this.takingSnapshot; }
 
   /**
    * Runs a page operation on the PDF bytes and shows the result; the previous bytes go on the undo stack.
@@ -948,6 +952,44 @@ class DocumentTab {
     }
   }
 
+  // MARK: Take a Snapshot
+
+  get takingSnapshot() { return !!this.stopSnapshot; }
+
+  /**
+   * Like Acrobat's "Take a Snapshot": the pointer becomes a crosshair, and the part of a page dragged over
+   * is copied to the clipboard and saved as a JPG. Choosing it again, or Esc, cancels.
+   */
+  takeSnapshot() {
+    if (this.takingSnapshot) return this.endSnapshot();
+    if (!this.canEdit || this.presenting) return;
+    this.stopSnapshot = startSnapshot(this.container, (pageNumber, part) => this.saveSnapshot(pageNumber, part));
+    if (this === state.selected) updateControls();
+  }
+
+  endSnapshot() {
+    if (!this.takingSnapshot) return;
+    this.stopSnapshot();
+    this.stopSnapshot = null;
+    if (this === state.selected) updateControls();
+  }
+
+  async saveSnapshot(pageNumber, part) {
+    this.endSnapshot();
+    let bytes;
+    try {
+      bytes = await renderSnapshot(this.pdf, pageNumber, part);
+    } catch (error) {
+      window.host.showError("Export failed", errorMessage(error));
+      return;
+    }
+    try {
+      await window.host.saveSnapshot(`${this.baseName} (page ${pageNumber}).jpg`, bytes);
+    } catch (error) {
+      window.host.showError("The file can't be saved", errorMessage(error));
+    }
+  }
+
   // MARK: Thumbnails
 
   async buildThumbnails() {
@@ -1376,6 +1418,7 @@ function truncateMiddle(text, tabWidth) {
 function updateControls() {
   syncMenu();
   const tab = state.selected;
+  el.snapshotBar.hidden = !tab?.takingSnapshot || state.presenting;
   if (!tab) return;
   if (document.activeElement !== el.pageField) el.pageField.value = tab.currentPage;
   el.pageCount.textContent = `/ ${tab.pageCount}`;
@@ -1422,6 +1465,7 @@ function syncMenu() {
     showThumbnails: state.showThumbnails,
     presenting: state.presenting,
     canEdit: tab?.canEdit ?? false,
+    takingSnapshot: tab?.takingSnapshot ?? false,
     isDirty: tab?.isDirty ?? false,
     canUndo: (tab?.history.length ?? 0) > 0,
     currentPage: tab?.currentPage,
@@ -1548,6 +1592,32 @@ function showPageMenu(tab, n, x, y) {
   });
 }
 
+/** Right click on a page. */
+function showViewMenu(tab, x, y) {
+  const enabled = tab.canEdit;
+  const hasSelection = !!window.getSelection()?.toString().trim();
+  popup([
+    { id: "snapshot", label: "Take a Snapshot", icon: "camera", enabled },
+    { id: "recognize", label: "Recognize Text", enabled },
+    { type: "separator" },
+    { id: "copy", label: "Copy", accelerator: "Ctrl+C", enabled: hasSelection },
+    { type: "separator" },
+    { id: "zoomIn", label: "Zoom In", accelerator: "Ctrl+=" },
+    { id: "zoomOut", label: "Zoom Out", accelerator: "Ctrl+-" },
+    { type: "separator" },
+    { id: "next", label: "Next Page", enabled: tab.currentPage < tab.pageCount },
+    { id: "previous", label: "Previous Page", enabled: tab.currentPage > 1 },
+  ], x, y, {
+    snapshot: () => tab.takeSnapshot(),
+    recognize: () => tab.recognizeText(),
+    copy: () => document.execCommand("copy"),
+    zoomIn: () => tab.zoomIn(),
+    zoomOut: () => tab.zoomOut(),
+    next: () => tab.nextPage(),
+    previous: () => tab.previousPage(),
+  });
+}
+
 /** The "Updates" button; on macOS the same items are in the app menu. */
 function showUpdatesMenu() {
   const rect = el.updatesButton.getBoundingClientRect();
@@ -1571,6 +1641,7 @@ function startPresentation() {
   if (state.presenting || !tab) return;
   closeMenus();
   tab.endPlacing();
+  tab.endSnapshot();
   state.presenting = true;
   document.body.classList.add("presenting", "hide-cursor");
   tab.setPresenting(true);
@@ -1612,7 +1683,12 @@ el.documents.addEventListener("click", (event) => {
   document.body.classList.add("hide-cursor");
 });
 el.documents.addEventListener("contextmenu", (event) => {
-  if (!state.presenting) return;
+  if (!state.presenting) {
+    if (!state.selected || !event.target.closest(".viewer-container")) return;
+    event.preventDefault();
+    showViewMenu(state.selected, event.clientX, event.clientY);
+    return;
+  }
   event.preventDefault();
   actions.previousPage();
   document.body.classList.add("hide-cursor");
@@ -1656,6 +1732,9 @@ const actions = {
   rotateLeft: withTab((tab) => tab.rotate(-90)),
   rotateRight: withTab((tab) => tab.rotate(90)),
   exportJPG: withTab((tab) => tab.exportJPEG()),
+  takeSnapshot: withTab((tab) => {
+    if (!state.presenting) tab.takeSnapshot();
+  }),
   save: withTab((tab) => tab.save()),
   saveAs: withTab((tab) => tab.saveAs()),
   undo: withTab((tab) => tab.undo()),
@@ -1706,6 +1785,7 @@ el.exportCancel.addEventListener("click", () => {
   if (progress?.cancellable) progress.cancelled = true;
   updateExportProgress();
 });
+el.snapshotCancel.addEventListener("click", () => state.selected?.endSnapshot());
 el.addTab.addEventListener("click", actions.open);
 el.toggleThumbs.addEventListener("click", actions.toggleThumbnails);
 el.prevPage.addEventListener("click", actions.previousPage);
@@ -1806,6 +1886,11 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (event.key === "Enter") state.selected.placeImage();
     else state.selected.endPlacing();
+    return;
+  }
+  if (event.key === "Escape" && state.selected?.takingSnapshot) {
+    event.preventDefault();
+    state.selected.endSnapshot();
     return;
   }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;

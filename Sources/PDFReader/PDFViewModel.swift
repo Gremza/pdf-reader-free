@@ -76,7 +76,7 @@ enum PageLayout: String, CaseIterable, Identifiable {
 final class PDFViewModel: ObservableObject {
     static let undoLimit = 30
 
-    let pdfView = PDFView()
+    let pdfView = DocumentPDFView()
     /// Where the PDF is saved; changes with "Save As".
     @Published private(set) var url: URL
     /// Made with "New PDF…" and not saved yet; "Save" asks where to save it.
@@ -96,6 +96,8 @@ final class PDFViewModel: ObservableObject {
     /// "Add Image to Page": the image being moved and resized, before it is placed.
     @Published private(set) var placingImage: ImagePlacementView?
     private var placementObservers: [NSObjectProtocol] = []
+    /// "Take a Snapshot": the part of a page to save is being dragged out.
+    @Published var isTakingSnapshot = false
     /// Bumps on every change of the document's pages, so thumbnails redraw.
     @Published private(set) var revision = 0
     // Every edit gets a new version; the document is unsaved while it differs from the saved one
@@ -121,8 +123,8 @@ final class PDFViewModel: ObservableObject {
 
     var isDirty: Bool { version != savedVersion }
     var canUndo: Bool { !history.isEmpty && canEdit }
-    /// Edits wait while an export reads the document or an image is being placed.
-    var canEdit: Bool { exportProgress == nil && placingImage == nil }
+    /// Edits wait while an export reads the document, an image is being placed or a snapshot is being taken.
+    var canEdit: Bool { exportProgress == nil && placingImage == nil && !isTakingSnapshot }
     var baseName: String { url.deletingPathExtension().lastPathComponent }
     /// Full Screen Mode always shows single pages, whatever the layout.
     private var displayMode: PDFDisplayMode { isPresenting ? .singlePage : layout.displayMode }
@@ -133,6 +135,7 @@ final class PDFViewModel: ObservableObject {
         // A new PDF is unsaved from the start
         if isNew { version = nextVersion; nextVersion += 1 }
         pdfView.document = document
+        pdfView.owner = self
         pdfView.autoScales = true
         pdfView.displayMode = layout.displayMode
         pdfView.displayDirection = .vertical
@@ -199,6 +202,7 @@ final class PDFViewModel: ObservableObject {
     func setPresenting(_ presenting: Bool) {
         guard presenting != isPresenting else { return }
         if presenting { endPlacing() }
+        if presenting { endSnapshot() }
         let page = pdfView.currentPage
         if presenting {
             fitBeforePresenting = fitMode
@@ -439,13 +443,15 @@ final class PDFViewModel: ObservableObject {
         return folder
     }
 
-    /// Renders the page at 144 DPI on white, as JPEG.
-    nonisolated private static func jpegData(for page: PDFPage, scale: CGFloat = 2) throws -> Data {
+    /// Renders the page at 144 DPI on white, as JPEG; or only `region` of it (in page space), as "Take a Snapshot" does.
+    /// Changes the page's rotation, so it must be a copy.
+    nonisolated static func jpegData(for page: PDFPage, region: CGRect? = nil, scale: CGFloat = 2) throws -> Data {
         let box = page.bounds(for: .cropBox)
         let rotation = (page.rotation % 360 + 360) % 360
-        var size = box.size
-        if rotation % 180 != 0 { size = CGSize(width: size.height, height: size.width) }
-        let width = Int((size.width * scale).rounded()), height = Int((size.height * scale).rounded())
+        let toPixels = displayTransform(box: box, rotation: rotation, scale: scale)
+        // The page or the part of it, upright, in pixels
+        let area = (region ?? box).applying(toPixels)
+        let width = Int(area.width.rounded()), height = Int(area.height.rounded())
 
         guard width > 0, height > 0,
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -455,7 +461,8 @@ final class PDFViewModel: ObservableObject {
 
         context.setFillColor(.white)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        context.concatenate(displayTransform(box: box, rotation: rotation, scale: scale))
+        context.translateBy(x: -area.minX, y: -area.minY)
+        context.concatenate(toPixels)
         // Rotation is applied above, so draw the page unrotated
         page.rotation = 0
         page.draw(with: .cropBox, to: context)
@@ -470,7 +477,7 @@ final class PDFViewModel: ObservableObject {
     }
 
     /// Maps the page's user space to an image of the page as it is shown: upright and `scale` pixels per point.
-    nonisolated private static func displayTransform(box: CGRect, rotation: Int, scale: CGFloat) -> CGAffineTransform {
+    nonisolated static func displayTransform(box: CGRect, rotation: Int, scale: CGFloat) -> CGAffineTransform {
         var transform = CGAffineTransform(scaleX: scale, y: scale)
         // Page rotation is clockwise; CoreGraphics angles are counterclockwise
         switch rotation {
@@ -687,7 +694,7 @@ final class PDFViewModel: ObservableObject {
         return true
     }
 
-    private func askSaveURL(name: String, type: UTType, message: String) -> URL? {
+    func askSaveURL(name: String, type: UTType, message: String) -> URL? {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [type]
         panel.nameFieldStringValue = name
@@ -698,7 +705,7 @@ final class PDFViewModel: ObservableObject {
 
     /// Atomic, so a failed save never leaves a half-written file.
     @discardableResult
-    private func write(_ data: Data, to target: URL) -> Bool {
+    func write(_ data: Data, to target: URL) -> Bool {
         do {
             try data.write(to: target, options: .atomic)
             return true

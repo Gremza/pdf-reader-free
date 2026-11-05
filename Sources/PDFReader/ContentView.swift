@@ -44,6 +44,7 @@ private struct DocumentView: View {
                 .overlay(alignment: .bottom) {
                     ExportProgressBadge(model: model)
                     ImagePlacementBar(model: model)
+                    SnapshotBar(model: model)
                 }
         }
     }
@@ -92,6 +93,27 @@ private struct ImagePlacementBar: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Place Image", action: model.placeImage)
                     .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4, y: 1)
+            .padding(.bottom, 20)
+        }
+    }
+}
+
+/// "Take a Snapshot": shown while the part of the page to save is dragged out.
+private struct SnapshotBar: View {
+    @ObservedObject var model: PDFViewModel
+
+    var body: some View {
+        if model.isTakingSnapshot, !model.isPresenting {
+            HStack(spacing: 10) {
+                Image(systemName: "camera")
+                Text("Drag over the part of the page to save as JPG.")
+                Button("Cancel", action: model.endSnapshot)
+                    .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
