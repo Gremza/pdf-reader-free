@@ -144,10 +144,11 @@ final class TabsModel: ObservableObject {
         return discardConfirmed
     }
 
-    // MARK: Page Down / Page Up
+    // MARK: Page Down / Page Up, ↓ / ↑
 
     /// Presentation remotes send Page Down / Page Up, so these keys turn pages outside
     /// Full Screen Mode too, even while the page or search field has the keyboard.
+    /// ↓ / ↑ turn pages like → / ←, but text fields keep them.
     private func installPageKeys() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let handled = MainActor.assumeIsolated { self?.handlePageKey(event) ?? false }
@@ -158,9 +159,12 @@ final class TabsModel: ObservableObject {
     private func handlePageKey(_ event: NSEvent) -> Bool {
         guard !isPresenting, event.window === window, let model = selected?.model,
               event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { return false }
+        let inText = window?.firstResponder is NSText
         switch event.specialKey {
         case .pageDown?: model.nextPage()
         case .pageUp?: model.previousPage()
+        case .downArrow? where !inText: model.nextPage()
+        case .upArrow? where !inText: model.previousPage()
         default: return false
         }
         return true

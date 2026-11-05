@@ -1542,6 +1542,8 @@ const shortcuts = {
   "Ctrl+Shift+{": "previousTab",
   "ArrowLeft": "previousPage",
   "ArrowRight": "nextPage",
+  "ArrowUp": "previousPage",
+  "ArrowDown": "nextPage",
   "Ctrl+PageUp": "previousPage",
   "Ctrl+PageDown": "nextPage",
   // Presentation remotes send Page Down / Page Up
@@ -1578,7 +1580,7 @@ const shortcuts = {
 };
 
 // Text fields keep these keys for themselves
-const fieldKeys = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "Ctrl+z"]);
+const fieldKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Ctrl+z"]);
 
 document.addEventListener("keydown", (event) => {
   if (el.promptDialog.open) return;

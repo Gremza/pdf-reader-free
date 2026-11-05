@@ -50,7 +50,7 @@ The same as in Adobe Acrobat Reader.
 | Open PDF(s) | `⌘O` | `Ctrl+O` |
 | Close tab | `⌘W` | `Ctrl+W` |
 | Next / previous tab | `⌘⇧]` / `⌘⇧[` | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
-| Next / previous page | `→` / `←` (or `Page Down` / `Page Up`, e.g. from a presentation remote) | `→` / `←` (or `Page Down` / `Page Up`, `Ctrl+Page Down` / `Ctrl+Page Up`) |
+| Next / previous page | `→` / `←` or `↓` / `↑` (or `Page Down` / `Page Up`, e.g. from a presentation remote) | `→` / `←` or `↓` / `↑` (or `Page Down` / `Page Up`, `Ctrl+Page Down` / `Ctrl+Page Up`) |
 | First / last page | `Home` / `End` | `Home` / `End` |
 | Go to page | `⌘⇧N` | `Ctrl+Shift+N` |
 | Zoom in / out | `⌘=` / `⌘−` | `Ctrl+=` / `Ctrl+−` (or `Ctrl` + mouse wheel) |
