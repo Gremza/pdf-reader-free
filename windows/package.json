@@ -1,7 +1,7 @@
 {
   "name": "pdf-reader-free",
   "productName": "PDF Gremza",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "A simple, fast and free PDF viewer",
   "author": "Marsel Preci",
   "license": "MIT",
@@ -27,7 +27,8 @@
     "productName": "PDF Gremza",
     "copyright": "Created by gremza.com open source",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "installer"
     },
     "files": [
       "src/**",
@@ -47,7 +48,8 @@
         "ext": "pdf",
         "name": "PDF Document",
         "description": "PDF Document",
-        "role": "Viewer"
+        "role": "Viewer",
+        "icon": "pdf"
       }
     ],
     "mac": {
@@ -70,6 +72,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
+      "include": "installer/installer.nsh",
       "artifactName": "PDF-Reader-Setup-${version}-${arch}.${ext}"
     },
     "portable": {

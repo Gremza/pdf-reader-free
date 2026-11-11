@@ -1,0 +1,4 @@
+LIBRARY pdfthumb
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

@@ -84,7 +84,7 @@ The app is signed and notarized by Apple, so it opens normally (the first time m
 
 ### Windows
 
-Grab `PDF-Reader-Setup-<version>-x64.exe` from the [latest release](../../releases/latest) and run it (or use `PDF-Reader-Portable-<version>-x64.exe`, which runs without installing). The installer registers PDF Gremza under *Open with* for `.pdf` files.
+Grab `PDF-Reader-Setup-<version>-x64.exe` from the [latest release](../../releases/latest) and run it (or use `PDF-Reader-Portable-<version>-x64.exe`, which runs without installing). The installer registers PDF Gremza under *Open with* for `.pdf` files. When PDF Gremza is the default app for PDFs, File Explorer shows each PDF's first page as its thumbnail, with the app icon small in the corner (the portable exe doesn't do this).
 
 The app is not code-signed, so Windows SmartScreen may warn the first time: click **More info** → **Run anyway**.
 
@@ -100,7 +100,7 @@ cd pdf-reader-free
 
 `build.sh` compiles a release build, creates `build/PDF Gremza.app` and copies it to `/Applications`.
 
-The logo is `Resources/AppIcon.svg`. After changing it, regenerate the macOS, Windows and website icons with `swift Tools/make_icon.swift`
+The logo is `Resources/AppIcon.svg`. After changing it, regenerate the macOS, Windows, PDF file and website icons with `swift Tools/make_icon.swift`
 
 ### Build from source (Windows)
 
@@ -113,6 +113,8 @@ npm start            # run in development
 npm run dist         # build the x64 installer + portable exe into windows/dist/
 npm run dist:arm64   # same for Windows on ARM
 ```
+
+The File Explorer thumbnails come from `windows/installer/pdfthumb.dll`, which is checked in. After changing `pdfthumb.c`, rebuild it with `windows/installer/build-thumbnail.sh` (needs MinGW-w64: `brew install mingw-w64` on macOS) and raise the number in `THUMB_DLL` in `installer.nsh`.
 
 ## Project structure
 
@@ -145,6 +147,10 @@ windows/src/
   snapshot.js          Take a Snapshot: drag over part of a page, save it as JPG
   icons/               Menu item icons
   styles.css           Light / dark theme
+windows/installer/
+  installer.nsh        Installer additions: File Explorer thumbnails of PDFs
+  pdfthumb.c           The thumbnail DLL (first page, drawn by Windows' own PDF renderer)
+  pdf.ico              Icon of PDF files opened with the app
 ```
 
 ## Contributing
