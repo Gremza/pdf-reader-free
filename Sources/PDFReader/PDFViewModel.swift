@@ -96,6 +96,9 @@ final class PDFViewModel: ObservableObject {
     /// "Add Image to Page": the image being moved and resized, before it is placed.
     @Published private(set) var placingImage: ImagePlacementView?
     private var placementObservers: [NSObjectProtocol] = []
+    /// "Draw Shapes": the layer over the pages where shapes are drawn, before they become part of them.
+    @Published var shapeOverlay: ShapeOverlay?
+    var shapeObservers: [NSObjectProtocol] = []
     /// "Take a Snapshot": the part of a page to save is being dragged out.
     @Published var isTakingSnapshot = false
     /// Bumps on every change of the document's pages, so thumbnails redraw.
@@ -123,8 +126,8 @@ final class PDFViewModel: ObservableObject {
 
     var isDirty: Bool { version != savedVersion }
     var canUndo: Bool { !history.isEmpty && canEdit }
-    /// Edits wait while an export reads the document, an image is being placed or a snapshot is being taken.
-    var canEdit: Bool { exportProgress == nil && placingImage == nil && !isTakingSnapshot }
+    /// Edits wait while an export reads the document, an image is being placed, a snapshot is being taken or shapes are drawn.
+    var canEdit: Bool { exportProgress == nil && placingImage == nil && !isTakingSnapshot && shapeOverlay == nil }
     var baseName: String { url.deletingPathExtension().lastPathComponent }
     /// Full Screen Mode always shows single pages, whatever the layout.
     private var displayMode: PDFDisplayMode { isPresenting ? .singlePage : layout.displayMode }
@@ -201,8 +204,11 @@ final class PDFViewModel: ObservableObject {
     /// the layout and zoom come back afterwards.
     func setPresenting(_ presenting: Bool) {
         guard presenting != isPresenting else { return }
-        if presenting { endPlacing() }
-        if presenting { endSnapshot() }
+        if presenting {
+            endPlacing()
+            endSnapshot()
+            cancelShapes()
+        }
         let page = pdfView.currentPage
         if presenting {
             fitBeforePresenting = fitMode
@@ -1190,18 +1196,23 @@ final class PDFViewModel: ObservableObject {
     func startPlacing(_ placement: ImagePlacementView) {
         placingImage = placement
         pdfView.addSubview(placement)
+        placementObservers = observeViewChanges { [weak placement] in placement?.updateFrame() }
+    }
+
+    /// Calls `update` whenever the PDF view scrolls, zooms or changes its layout; remove the observers when done.
+    func observeViewChanges(_ update: @escaping @MainActor () -> Void) -> [NSObjectProtocol] {
         let clipView = pdfView.documentView?.enclosingScrollView?.contentView
         clipView?.postsBoundsChangedNotifications = true
         let center = NotificationCenter.default
-        let update: @Sendable (Notification) -> Void = { [weak placement] _ in
-            MainActor.assumeIsolated { placement?.updateFrame() }
+        let observer: @Sendable (Notification) -> Void = { _ in
+            MainActor.assumeIsolated { update() }
         }
-        placementObservers = [
-            center.addObserver(forName: .PDFViewScaleChanged, object: pdfView, queue: .main, using: update),
-            center.addObserver(forName: .PDFViewDisplayModeChanged, object: pdfView, queue: .main, using: update),
-            center.addObserver(forName: .PDFViewPageChanged, object: pdfView, queue: .main, using: update),
-            center.addObserver(forName: NSView.frameDidChangeNotification, object: pdfView, queue: .main, using: update),
-            center.addObserver(forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main, using: update),
+        return [
+            center.addObserver(forName: .PDFViewScaleChanged, object: pdfView, queue: .main, using: observer),
+            center.addObserver(forName: .PDFViewDisplayModeChanged, object: pdfView, queue: .main, using: observer),
+            center.addObserver(forName: .PDFViewPageChanged, object: pdfView, queue: .main, using: observer),
+            center.addObserver(forName: NSView.frameDidChangeNotification, object: pdfView, queue: .main, using: observer),
+            center.addObserver(forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main, using: observer),
         ]
     }
 

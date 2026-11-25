@@ -49,6 +49,7 @@ private struct DocumentView: View {
                     ExportProgressBadge(model: model)
                     ImagePlacementBar(model: model)
                     SnapshotBar(model: model)
+                    ShapesBar(model: model)
                 }
         }
     }
@@ -121,6 +122,77 @@ private struct SnapshotBar: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4, y: 1)
+            .padding(.bottom, 20)
+        }
+    }
+}
+
+/// "Draw Shapes": the tool, color and line width, shown while shapes are drawn.
+private struct ShapesBar: View {
+    @ObservedObject var model: PDFViewModel
+
+    var body: some View {
+        if let overlay = model.shapeOverlay, !model.isPresenting {
+            Controls(model: model, overlay: overlay)
+        }
+    }
+
+    private struct Controls: View {
+        let model: PDFViewModel
+        @ObservedObject var overlay: ShapeOverlay
+
+        var body: some View {
+            HStack(spacing: 12) {
+                // Buttons rather than a segmented picker, which drops the tooltips
+                HStack(spacing: 2) {
+                    ForEach(ShapeKind.allCases) { kind in
+                        Button { overlay.kind = kind } label: {
+                            Image(systemName: kind.systemImage)
+                                .frame(width: 28, height: 22)
+                                .foregroundStyle(overlay.kind == kind ? Color.accentColor : .primary)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(.background).opacity(overlay.kind == kind ? 1 : 0))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(kind.title)
+                        .accessibilityLabel(kind.title)
+                        .accessibilityAddTraits(overlay.kind == kind ? .isSelected : [])
+                    }
+                }
+                .padding(2)
+                .background(RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(0.07)))
+                HStack(spacing: 6) {
+                    ForEach(ShapeColor.allCases) { color in
+                        Button { overlay.color = color } label: {
+                            Circle()
+                                .fill(Color(cgColor: color.cgColor))
+                                .frame(width: 16, height: 16)
+                                .overlay(Circle().strokeBorder(.primary.opacity(0.25)))
+                                .padding(3)
+                                .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2).opacity(overlay.color == color ? 1 : 0))
+                        }
+                        .buttonStyle(.plain)
+                        .help(color.title)
+                        .accessibilityLabel(color.title)
+                    }
+                }
+                Picker("Line Width", selection: $overlay.width) {
+                    ForEach(ShapeWidth.allCases) { width in
+                        Text(width.title).tag(width)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("Line Width")
+                Button("Cancel", action: model.cancelShapes)
+                    .keyboardShortcut(.cancelAction)
+                Button("Done", action: model.finishShapes)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
             .background(.regularMaterial, in: Capsule())
             .shadow(radius: 4, y: 1)
             .padding(.bottom, 20)

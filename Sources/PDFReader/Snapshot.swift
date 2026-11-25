@@ -56,6 +56,7 @@ extension PDFViewModel {
     func contextMenuItems() -> [NSMenuItem] {
         [
             MenuAction.item("Take a Snapshot", systemImage: "camera", enabled: canEdit, run: takeSnapshot),
+            MenuAction.item("Draw Shapes", enabled: canEdit, run: drawShapes),
             MenuAction.item("Recognize Text", enabled: canEdit, run: recognizeText),
         ]
     }

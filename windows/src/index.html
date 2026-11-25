@@ -110,6 +110,29 @@
       <span>Drag over the part of the page to save as JPG.</span>
       <button id="snapshot-cancel" class="secondary-button">Cancel</button>
     </div>
+    <div id="shapes-bar" class="export-progress shapes-bar" role="toolbar" aria-label="Draw Shapes" hidden>
+      <div class="shape-kinds" role="radiogroup" aria-label="Shape">
+        <button role="radio" data-kind="line" title="Line" aria-label="Line"><svg viewBox="0 0 24 24"><path d="M6 18 18 6"/></svg></button>
+        <button role="radio" data-kind="arrow" title="Arrow" aria-label="Arrow"><svg viewBox="0 0 24 24"><path d="M6 18 18 6M10 6h8v8"/></svg></button>
+        <button role="radio" data-kind="rectangle" title="Rectangle" aria-label="Rectangle"><svg viewBox="0 0 24 24"><rect x="4" y="6.5" width="16" height="11" rx="1"/></svg></button>
+        <button role="radio" data-kind="oval" title="Oval" aria-label="Oval"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8.5" ry="6"/></svg></button>
+      </div>
+      <div class="shape-colors" role="radiogroup" aria-label="Color">
+        <button role="radio" data-color="red" title="Red" aria-label="Red" style="--swatch: #e53935"></button>
+        <button role="radio" data-color="orange" title="Orange" aria-label="Orange" style="--swatch: #fb8c00"></button>
+        <button role="radio" data-color="yellow" title="Yellow" aria-label="Yellow" style="--swatch: #fdd835"></button>
+        <button role="radio" data-color="green" title="Green" aria-label="Green" style="--swatch: #43a047"></button>
+        <button role="radio" data-color="blue" title="Blue" aria-label="Blue" style="--swatch: #1e88e5"></button>
+        <button role="radio" data-color="black" title="Black" aria-label="Black" style="--swatch: #000000"></button>
+      </div>
+      <select id="shape-width" title="Line Width" aria-label="Line Width">
+        <option value="thin">Thin</option>
+        <option value="medium">Medium</option>
+        <option value="thick">Thick</option>
+      </select>
+      <button id="shapes-cancel" class="secondary-button">Cancel</button>
+      <button id="shapes-done" class="primary-button">Done</button>
+    </div>
     <div id="update-progress" class="export-progress update-progress" role="status" hidden>
       <progress id="update-bar" max="1"></progress>
       <span>Downloading update…</span>

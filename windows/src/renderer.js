@@ -7,6 +7,7 @@ import { extractDocument, hasText } from "./word.js";
 import { REDUCED_QUALITIES, reduceImages } from "./reduce.js";
 import { CancelledError, recognizeText } from "./ocr.js";
 import { renderSnapshot, startSnapshot } from "./snapshot.js";
+import { ShapeDrawing } from "./shapes.js";
 
 // pdf_viewer.mjs reads the core library from this global
 globalThis.pdfjsLib = pdfjsLib;
@@ -62,6 +63,10 @@ const el = {
   placementPlace: $("placement-place"),
   snapshotBar: $("snapshot-bar"),
   snapshotCancel: $("snapshot-cancel"),
+  shapesBar: $("shapes-bar"),
+  shapeWidth: $("shape-width"),
+  shapesCancel: $("shapes-cancel"),
+  shapesDone: $("shapes-done"),
   documentButton: $("document-button"),
   promptDialog: $("prompt-dialog"),
   promptField: $("prompt-field"),
@@ -88,6 +93,8 @@ const state = {
   presenting: false,
   // Update settings and whether a check is running, from the main process
   updates: {},
+  // "Draw Shapes": the tool, color and width of the next shape, kept for the next drawing
+  shapeStyle: { kind: "rectangle", color: "red", width: "medium" },
 };
 
 let nextID = 1;
@@ -164,9 +171,15 @@ class DocumentTab {
         this.pendingPage = null;
       }
     });
-    // pdf.js empties a page when it draws it again, so the image being placed goes back on top
-    this.eventBus.on("pagerender", () => this.attachPlacement());
-    this.eventBus.on("pagerendered", () => this.attachPlacement());
+    // pdf.js empties a page when it draws it again, so the image being placed and the shapes go back on top
+    this.eventBus.on("pagerender", () => {
+      this.attachPlacement();
+      this.shapes?.attach();
+    });
+    this.eventBus.on("pagerendered", () => {
+      this.attachPlacement();
+      this.shapes?.attach();
+    });
     this.eventBus.on("pagechanging", ({ pageNumber }) => {
       this.currentPage = pageNumber;
       this.updateCurrentThumbnail();
@@ -211,6 +224,7 @@ class DocumentTab {
     // A running "Recognize Text" stops without a message
     if (this.exportProgress?.cancellable) this.exportProgress.cancelled = true;
     this.endSnapshot();
+    this.endShapes();
     this.thumbnailObserver?.disconnect();
     this.viewer.setDocument(null);
     this.linkService.setDocument(null);
@@ -372,8 +386,8 @@ class DocumentTab {
 
   // MARK: Editing
 
-  /** Edits wait while an export reads the document, an image is being placed or a snapshot is being taken. */
-  get canEdit() { return !this.busy && !this.exportProgress && !this.placement && !this.takingSnapshot; }
+  /** Edits wait while an export reads the document, an image is being placed, a snapshot is being taken or shapes are drawn. */
+  get canEdit() { return !this.busy && !this.exportProgress && !this.placement && !this.takingSnapshot && !this.shapes; }
 
   /**
    * Runs a page operation on the PDF bytes and shows the result; the previous bytes go on the undo stack.
@@ -990,6 +1004,43 @@ class DocumentTab {
     }
   }
 
+  // MARK: Draw Shapes
+
+  get drawingShapes() { return !!this.shapes; }
+
+  /** Shapes are drawn over the pages and become part of them with Done; choosing it again is Done too. */
+  async drawShapes() {
+    if (this.shapes) return this.finishShapes();
+    if (!this.canEdit || this.presenting) return;
+    try {
+      await assertEditable(this.bytes);
+    } catch (error) {
+      showEditError(error);
+      return;
+    }
+    if (!this.canEdit || this.presenting) return;
+    // Enter, Esc and Delete are for the shapes, not for a text field
+    document.activeElement?.blur();
+    this.shapes = new ShapeDrawing(this.viewer, state.shapeStyle);
+    this.shapes.attach();
+    if (this === state.selected) updateShapesBar();
+  }
+
+  /** Draws the shapes into their pages, as one edit that can be undone. */
+  finishShapes() {
+    const pages = this.shapes?.pdfShapes();
+    this.endShapes();
+    if (pages?.length) this.applyEdit((bytes) => pageEdits.drawShapes(bytes, pages), this.currentPage);
+  }
+
+  /** Takes the shapes away without drawing them. */
+  endShapes() {
+    if (!this.shapes) return;
+    this.shapes.remove();
+    this.shapes = null;
+    if (this === state.selected) updateShapesBar();
+  }
+
   // MARK: Thumbnails
 
   async buildThumbnails() {
@@ -1297,6 +1348,7 @@ function render() {
   updateControls();
   updateExportProgress();
   updatePlacementBar();
+  updateShapesBar();
   if (tab) {
     el.searchField.value = tab.searchText;
     updateSearchCount();
@@ -1446,6 +1498,16 @@ function updatePlacementBar() {
   el.placementBar.hidden = !state.selected?.placement || state.presenting;
 }
 
+/** "Draw Shapes": the tool, color and line width, shown while shapes are drawn. */
+function updateShapesBar() {
+  syncMenu();
+  el.shapesBar.hidden = !state.selected?.drawingShapes || state.presenting;
+  const { kind, color, width } = state.shapeStyle;
+  for (const button of el.shapesBar.querySelectorAll("[data-kind]")) button.setAttribute("aria-checked", button.dataset.kind === kind);
+  for (const button of el.shapesBar.querySelectorAll("[data-color]")) button.setAttribute("aria-checked", button.dataset.color === color);
+  el.shapeWidth.value = width;
+}
+
 function updateSearchCount() {
   const tab = state.selected;
   const { current, total } = tab?.matches ?? {};
@@ -1466,6 +1528,7 @@ function syncMenu() {
     presenting: state.presenting,
     canEdit: tab?.canEdit ?? false,
     takingSnapshot: tab?.takingSnapshot ?? false,
+    drawingShapes: tab?.drawingShapes ?? false,
     isDirty: tab?.isDirty ?? false,
     canUndo: (tab?.history.length ?? 0) > 0,
     currentPage: tab?.currentPage,
@@ -1598,6 +1661,7 @@ function showViewMenu(tab, x, y) {
   const hasSelection = !!window.getSelection()?.toString().trim();
   popup([
     { id: "snapshot", label: "Take a Snapshot", icon: "camera", enabled },
+    { id: "shapes", label: "Draw Shapes", enabled },
     { id: "recognize", label: "Recognize Text", enabled },
     { type: "separator" },
     { id: "copy", label: "Copy", accelerator: "Ctrl+C", enabled: hasSelection },
@@ -1609,6 +1673,7 @@ function showViewMenu(tab, x, y) {
     { id: "previous", label: "Previous Page", enabled: tab.currentPage > 1 },
   ], x, y, {
     snapshot: () => tab.takeSnapshot(),
+    shapes: () => tab.drawShapes(),
     recognize: () => tab.recognizeText(),
     copy: () => document.execCommand("copy"),
     zoomIn: () => tab.zoomIn(),
@@ -1663,6 +1728,7 @@ function startPresentation() {
   closeMenus();
   tab.endPlacing();
   tab.endSnapshot();
+  tab.endShapes();
   state.presenting = true;
   document.body.classList.add("presenting", "hide-cursor");
   tab.setPresenting(true);
@@ -1775,6 +1841,9 @@ const actions = {
   takeSnapshot: withTab((tab) => {
     if (!state.presenting) tab.takeSnapshot();
   }),
+  drawShapes: withTab((tab) => {
+    if (!state.presenting) tab.drawShapes();
+  }),
   save: withTab((tab) => tab.save()),
   saveAs: withTab((tab) => tab.saveAs()),
   undo: withTab((tab) => tab.undo()),
@@ -1827,6 +1896,25 @@ el.exportCancel.addEventListener("click", () => {
   updateExportProgress();
 });
 el.snapshotCancel.addEventListener("click", () => state.selected?.endSnapshot());
+el.shapesCancel.addEventListener("click", () => state.selected?.endShapes());
+el.shapesDone.addEventListener("click", () => state.selected?.finishShapes());
+// The tool is for the next shape; the color and width also change the selected one
+el.shapesBar.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-kind], [data-color]");
+  if (!button) return;
+  if (button.dataset.kind) state.shapeStyle.kind = button.dataset.kind;
+  else {
+    state.shapeStyle.color = button.dataset.color;
+    state.selected?.shapes?.restyleSelected();
+  }
+  updateShapesBar();
+});
+el.shapeWidth.addEventListener("change", () => {
+  state.shapeStyle.width = el.shapeWidth.value;
+  state.selected?.shapes?.restyleSelected();
+  el.shapeWidth.blur();
+  updateShapesBar();
+});
 el.addTab.addEventListener("click", actions.open);
 el.toggleThumbs.addEventListener("click", actions.toggleThumbnails);
 el.prevPage.addEventListener("click", actions.previousPage);
@@ -1928,6 +2016,20 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Enter") state.selected.placeImage();
     else state.selected.endPlacing();
     return;
+  }
+  // "Draw Shapes": Enter draws them into the pages, Esc takes them away, Delete removes the selected one
+  const shapes = state.selected?.shapes;
+  if (shapes && !(event.target instanceof HTMLInputElement)) {
+    if (event.key === "Enter" || event.key === "Escape") {
+      event.preventDefault();
+      if (event.key === "Enter") state.selected.finishShapes();
+      else state.selected.endShapes();
+      return;
+    }
+    if ((event.key === "Delete" || event.key === "Backspace") && shapes.deleteSelected()) {
+      event.preventDefault();
+      return;
+    }
   }
   if (event.key === "Escape" && state.selected?.takingSnapshot) {
     event.preventDefault();

@@ -587,3 +587,44 @@ body.dragging #documents::after {
 .image-placement .handle.tr { right: 0; top: 0; margin: -4px -4px 0 0; cursor: nesw-resize; }
 .image-placement .handle.bl { left: 0; bottom: 0; margin: 0 0 -4px -4px; cursor: nesw-resize; }
 .image-placement .handle.br { right: 0; bottom: 0; margin: 0 -4px -4px 0; cursor: nwse-resize; }
+
+/* MARK: Draw Shapes */
+
+.shape-layer { position: absolute; inset: 0; z-index: 20; width: 100%; height: 100%; overflow: hidden; cursor: crosshair; touch-action: none; }
+.shape-layer.moving { cursor: grabbing; }
+.shape-handle { fill: var(--accent); stroke: #ffffff; }
+.shapes-bar { gap: 12px; padding: 6px 12px 6px 8px; }
+.shape-kinds { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--hover); }
+.shape-kinds button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 26px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+}
+.shape-kinds button:hover { background: var(--hover); }
+.shape-kinds button[aria-checked="true"] { background: var(--field-bg); color: var(--accent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
+.shape-kinds svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.shape-colors { display: flex; gap: 4px; }
+.shape-colors button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--swatch) content-box;
+  box-shadow: inset 0 0 0 3px var(--menu-bg);
+}
+.shape-colors button[aria-checked="true"] { border-color: var(--accent); }
+#shape-width {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--field-border);
+  border-radius: 5px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+}

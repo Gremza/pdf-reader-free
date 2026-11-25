@@ -1,5 +1,6 @@
 import { EncryptedPDFError, PDFDocument, degrees } from "../node_modules/pdf-lib/dist/pdf-lib.esm.min.js";
 import { drawImageOnPage, insertImagePage, isPDF, readImage } from "./images.js";
+import { drawShapesOnPage } from "./shapes.js";
 
 /** Page operations. Each takes the PDF bytes and returns new bytes; the input is never modified. */
 
@@ -52,6 +53,11 @@ export const pageEdits = {
 
   /** Draws an image of `readImage` over the page; `matrix` maps the unit square, upright as shown, onto the page. */
   addImage: (bytes, index, image, matrix) => edit(bytes, (doc) => drawImageOnPage(doc, index, image, matrix)),
+
+  /** Draws the shapes of "Draw Shapes" over their pages: `pages` as `ShapeDrawing.pdfShapes` gives them. */
+  drawShapes: (bytes, pages) => edit(bytes, (doc) => {
+    for (const { index, shapes } of pages) drawShapesOnPage(doc.getPage(index), shapes);
+  }),
 };
 
 /** "New PDF…": a PDF of the given PDFs and images ({ name, data }), in order. */

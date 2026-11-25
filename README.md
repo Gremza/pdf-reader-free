@@ -34,6 +34,7 @@
 - **Recognize Text** (OCR) — makes scanned pages searchable: the text found on each page is added as an invisible layer over it, so it can be searched and copied; pages that already have text are skipped. Also in the right-click menu of a page. It works offline, with Apple's Vision on macOS and [Tesseract](https://github.com/naptha/tesseract.js) (English and Albanian) on Windows
 - **Export to Word** (`.docx`) — the text of the PDF, with paragraphs, bold/italic and font sizes
 - **Export to JPG** — saves every page as an image (`1.jpg`, `2.jpg`, …) in a new folder named after the PDF
+- **Draw Shapes** (Edit menu or right-click on a page) — lines, arrows, rectangles and ovals, borders only, in six colors and three line widths, to point at something on a page. Drag on the page to draw; click a shape to move it, resize it with its handles or change its color, `Delete` removes it; `Shift` keeps lines at 45° steps and makes squares and circles. *Done* (`Return`) draws them into the pages, with undo; `Esc` cancels
 - **Take a Snapshot** (Edit menu or right-click on a page) — drag over part of a page to save it as a JPG at 300 dpi; it is also copied to the clipboard, like in Acrobat. `Esc` cancels
 - **Print** — the system print dialog with printer, pages, copies, paper size and orientation; prints unsaved edits too, and turns pages of the other orientation to fill the sheet
 - **Updates** — checks GitHub for a new version at launch and once a day; installs it automatically or asks first (*Check for Updates…*, *Check for Updates Automatically*, *Install Updates Automatically* in the app menu on macOS, and in the Help menu and the **Updates** button on Windows)
@@ -131,6 +132,7 @@ Sources/PDFReader/
   WordExport.swift     PDF text → paragraphs → .docx
   PDFKitViews.swift    PDFView wrapper; the page's right-click menu
   Snapshot.swift       Take a Snapshot: drag over part of a page, save it as JPG
+  Shapes.swift         Draw Shapes: lines, arrows, rectangles and ovals over the pages
   WindowChrome.swift   Hidden title bar, traffic light positioning
 Resources/             Info.plist, app icon
 Tools/make_icon.swift  Makes every app icon from Resources/AppIcon.svg
@@ -145,6 +147,7 @@ windows/src/
   reduce.js            Reduce File Size: images recompressed as JPEG
   ocr.js               Recognize Text with Tesseract (models in tessdata/)
   snapshot.js          Take a Snapshot: drag over part of a page, save it as JPG
+  shapes.js            Draw Shapes: lines, arrows, rectangles and ovals over the pages
   icons/               Menu item icons
   styles.css           Light / dark theme
 windows/installer/

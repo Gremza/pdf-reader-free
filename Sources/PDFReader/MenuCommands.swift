@@ -70,6 +70,8 @@ struct DocumentCommands: Commands {
                 }
                 .labelStyle(.titleAndIcon)
                 .disabled((!model.canEdit && !model.isTakingSnapshot) || model.isPresenting)
+                Button("Draw Shapes", action: model.drawShapes)
+                    .disabled((!model.canEdit && model.shapeOverlay == nil) || model.isPresenting)
                 Divider()
                 Button("Search") { model.focusRequest = .search }
                     .keyboardShortcut("f")
