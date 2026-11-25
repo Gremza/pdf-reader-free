@@ -99,6 +99,11 @@ final class PDFViewModel: ObservableObject {
     /// "Draw Shapes": the layer over the pages where shapes are drawn, before they become part of them.
     @Published var shapeOverlay: ShapeOverlay?
     var shapeObservers: [NSObjectProtocol] = []
+    /// "Edit Text": the layer over the pages where lines are clicked to change them.
+    @Published var textOverlay: TextEditOverlay?
+    var textObservers: [NSObjectProtocol] = []
+    /// A saved copy of the document that the lines are read from; again after every edit.
+    var textSource: PDFDocument?
     /// "Take a Snapshot": the part of a page to save is being dragged out.
     @Published var isTakingSnapshot = false
     /// Bumps on every change of the document's pages, so thumbnails redraw.
@@ -126,8 +131,9 @@ final class PDFViewModel: ObservableObject {
 
     var isDirty: Bool { version != savedVersion }
     var canUndo: Bool { !history.isEmpty && canEdit }
-    /// Edits wait while an export reads the document, an image is being placed, a snapshot is being taken or shapes are drawn.
-    var canEdit: Bool { exportProgress == nil && placingImage == nil && !isTakingSnapshot && shapeOverlay == nil }
+    /// Edits wait while an export reads the document, an image is being placed, a snapshot is being taken,
+    /// shapes are drawn or text is edited.
+    var canEdit: Bool { exportProgress == nil && placingImage == nil && !isTakingSnapshot && shapeOverlay == nil && textOverlay == nil }
     var baseName: String { url.deletingPathExtension().lastPathComponent }
     /// Full Screen Mode always shows single pages, whatever the layout.
     private var displayMode: PDFDisplayMode { isPresenting ? .singlePage : layout.displayMode }
@@ -208,6 +214,7 @@ final class PDFViewModel: ObservableObject {
             endPlacing()
             endSnapshot()
             cancelShapes()
+            endTextEditing()
         }
         let page = pdfView.currentPage
         if presenting {
@@ -524,9 +531,10 @@ final class PDFViewModel: ObservableObject {
 
     /// Changes the document in place; the previous state goes on the undo stack.
     /// `pageAfter` is the page (1-based) to show afterwards. Returns false when nothing changed.
+    /// `duringTextEditing`: a line changed by Edit Text, which is the one edit allowed while it is on.
     @discardableResult
-    func applyEdit(pageAfter: Int? = nil, _ change: (PDFDocument) throws -> Void) -> Bool {
-        guard canEdit, ensureEditable(), let doc = pdfView.document else { return false }
+    func applyEdit(pageAfter: Int? = nil, duringTextEditing: Bool = false, _ change: (PDFDocument) throws -> Void) -> Bool {
+        guard duringTextEditing ? exportProgress == nil : canEdit, ensureEditable(), let doc = pdfView.document else { return false }
         guard let before = doc.dataRepresentation() else {
             showError("Edit failed", "The PDF can't be read.")
             return false

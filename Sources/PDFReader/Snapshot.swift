@@ -57,6 +57,7 @@ extension PDFViewModel {
         [
             MenuAction.item("Take a Snapshot", systemImage: "camera", enabled: canEdit, run: takeSnapshot),
             MenuAction.item("Draw Shapes", enabled: canEdit, run: drawShapes),
+            MenuAction.item("Edit Text", enabled: canEdit, run: editText),
             MenuAction.item("Recognize Text", enabled: canEdit, run: recognizeText),
         ]
     }

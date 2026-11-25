@@ -72,6 +72,8 @@ struct DocumentCommands: Commands {
                 .disabled((!model.canEdit && !model.isTakingSnapshot) || model.isPresenting)
                 Button("Draw Shapes", action: model.drawShapes)
                     .disabled((!model.canEdit && model.shapeOverlay == nil) || model.isPresenting)
+                Button("Edit Text", action: model.editText)
+                    .disabled((!model.canEdit && model.textOverlay == nil) || model.isPresenting)
                 Divider()
                 Button("Search") { model.focusRequest = .search }
                     .keyboardShortcut("f")

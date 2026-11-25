@@ -50,6 +50,7 @@ private struct DocumentView: View {
                     ImagePlacementBar(model: model)
                     SnapshotBar(model: model)
                     ShapesBar(model: model)
+                    TextEditBar(model: model)
                 }
         }
     }
@@ -119,6 +120,25 @@ private struct SnapshotBar: View {
                 Text("Drag over the part of the page to save as JPG.")
                 Button("Cancel", action: model.endSnapshot)
                     .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4, y: 1)
+            .padding(.bottom, 20)
+        }
+    }
+}
+
+/// "Edit Text": shown while lines can be clicked to change them.
+private struct TextEditBar: View {
+    @ObservedObject var model: PDFViewModel
+
+    var body: some View {
+        if model.textOverlay != nil, !model.isPresenting {
+            HStack(spacing: 10) {
+                Text("Click a line of text to change it, then press Return.")
+                Button("Done", action: model.endTextEditing)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

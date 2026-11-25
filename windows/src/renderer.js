@@ -1,6 +1,6 @@
 import * as pdfjsLib from "../node_modules/pdfjs-dist/build/pdf.mjs";
 import {
-  ProtectedPDFError, UnreadableFileError, assertEditable, createPDF, extractPages, pageEdits, parsePageRanges,
+  ProtectedPDFError, TextError, UnreadableFileError, assertEditable, createPDF, extractPages, pageEdits, parsePageRanges,
 } from "./editing.js";
 import { readImage } from "./images.js";
 import { extractDocument, hasText } from "./word.js";
@@ -8,6 +8,7 @@ import { REDUCED_QUALITIES, reduceImages } from "./reduce.js";
 import { CancelledError, recognizeText } from "./ocr.js";
 import { renderSnapshot, startSnapshot } from "./snapshot.js";
 import { ShapeDrawing } from "./shapes.js";
+import { TextEditing } from "./textedit.js";
 
 // pdf_viewer.mjs reads the core library from this global
 globalThis.pdfjsLib = pdfjsLib;
@@ -67,6 +68,8 @@ const el = {
   shapeWidth: $("shape-width"),
   shapesCancel: $("shapes-cancel"),
   shapesDone: $("shapes-done"),
+  textEditBar: $("text-edit-bar"),
+  textEditDone: $("text-edit-done"),
   documentButton: $("document-button"),
   promptDialog: $("prompt-dialog"),
   promptField: $("prompt-field"),
@@ -175,10 +178,12 @@ class DocumentTab {
     this.eventBus.on("pagerender", () => {
       this.attachPlacement();
       this.shapes?.attach();
+      this.textEditing?.attach();
     });
     this.eventBus.on("pagerendered", () => {
       this.attachPlacement();
       this.shapes?.attach();
+      this.textEditing?.attach();
     });
     this.eventBus.on("pagechanging", ({ pageNumber }) => {
       this.currentPage = pageNumber;
@@ -225,6 +230,7 @@ class DocumentTab {
     if (this.exportProgress?.cancellable) this.exportProgress.cancelled = true;
     this.endSnapshot();
     this.endShapes();
+    this.endTextEditing();
     this.thumbnailObserver?.disconnect();
     this.viewer.setDocument(null);
     this.linkService.setDocument(null);
@@ -386,15 +392,18 @@ class DocumentTab {
 
   // MARK: Editing
 
-  /** Edits wait while an export reads the document, an image is being placed, a snapshot is being taken or shapes are drawn. */
-  get canEdit() { return !this.busy && !this.exportProgress && !this.placement && !this.takingSnapshot && !this.shapes; }
+  /**
+   * Edits wait while an export reads the document, an image is being placed, a snapshot is being taken,
+   * shapes are drawn or text is edited.
+   */
+  get canEdit() { return !this.busy && !this.exportProgress && !this.placement && !this.takingSnapshot && !this.shapes && !this.textEditing; }
 
   /**
    * Runs a page operation on the PDF bytes and shows the result; the previous bytes go on the undo stack.
    * Resolves to false when nothing changed.
    */
-  async applyEdit(edit, pageAfter = this.currentPage) {
-    if (!this.canEdit) return false;
+  async applyEdit(edit, pageAfter = this.currentPage, allowed = this.canEdit) {
+    if (!allowed) return false;
     this.busy = true;
     try {
       const bytes = await edit(this.bytes);
@@ -1041,6 +1050,50 @@ class DocumentTab {
     if (this === state.selected) updateShapesBar();
   }
 
+  // MARK: Edit Text
+
+  get editingText() { return !!this.textEditing; }
+
+  /** A click on a line of text opens a field over it; each changed line is an edit that can be undone. Choosing it again ends it. */
+  async editText() {
+    if (this.textEditing) return this.endTextEditing();
+    if (!this.canEdit || this.presenting) return;
+    try {
+      await assertEditable(this.bytes);
+    } catch (error) {
+      showEditError(error);
+      return;
+    }
+    if (!this.canEdit || this.presenting) return;
+    document.activeElement?.blur();
+    this.textEditing = new TextEditing(this.viewer, (...args) => this.replaceLine(...args));
+    this.textEditing.setDocument(this.bytes, this.pdf);
+    this.textEditing.attach();
+    if (this === state.selected) updateTextEditBar();
+  }
+
+  /** `bytes`: the document the line was read from; a line of an older one is left alone. */
+  async replaceLine(number, lineIndex, text, bytes) {
+    const editing = this.textEditing;
+    // An edit still running finishes first
+    while (this.busy) await new Promise((resolve) => setTimeout(resolve, 50));
+    if (this.bytes !== bytes) return;
+    const changed = await this.applyEdit((current) => pageEdits.replaceLine(current, number - 1, lineIndex, text), number, !this.busy && !this.exportProgress);
+    if (changed && editing && this.textEditing === editing) {
+      editing.setDocument(this.bytes, this.pdf);
+      editing.attach();
+    }
+  }
+
+  endTextEditing() {
+    if (!this.textEditing) return;
+    // A field still open keeps its new text
+    this.textEditing.commitField();
+    this.textEditing.remove();
+    this.textEditing = null;
+    if (this === state.selected) updateTextEditBar();
+  }
+
   // MARK: Thumbnails
 
   async buildThumbnails() {
@@ -1315,6 +1368,8 @@ function errorMessage(error) {
 function showEditError(error) {
   if (error instanceof UnreadableFileError) {
     window.host.showError("The file can't be opened", error.message);
+  } else if (error instanceof TextError) {
+    window.host.showError("The text can't be written", "It has letters that the standard fonts can't write.");
   } else if (error instanceof ProtectedPDFError) {
     window.host.showError("This PDF is protected", "PDFs protected by a password or restrictions can't be edited.");
   } else {
@@ -1349,6 +1404,7 @@ function render() {
   updateExportProgress();
   updatePlacementBar();
   updateShapesBar();
+  updateTextEditBar();
   if (tab) {
     el.searchField.value = tab.searchText;
     updateSearchCount();
@@ -1508,6 +1564,12 @@ function updateShapesBar() {
   el.shapeWidth.value = width;
 }
 
+/** "Edit Text": shown while lines can be clicked to change them. */
+function updateTextEditBar() {
+  syncMenu();
+  el.textEditBar.hidden = !state.selected?.editingText || state.presenting;
+}
+
 function updateSearchCount() {
   const tab = state.selected;
   const { current, total } = tab?.matches ?? {};
@@ -1529,6 +1591,7 @@ function syncMenu() {
     canEdit: tab?.canEdit ?? false,
     takingSnapshot: tab?.takingSnapshot ?? false,
     drawingShapes: tab?.drawingShapes ?? false,
+    editingText: tab?.editingText ?? false,
     isDirty: tab?.isDirty ?? false,
     canUndo: (tab?.history.length ?? 0) > 0,
     currentPage: tab?.currentPage,
@@ -1662,6 +1725,7 @@ function showViewMenu(tab, x, y) {
   popup([
     { id: "snapshot", label: "Take a Snapshot", icon: "camera", enabled },
     { id: "shapes", label: "Draw Shapes", enabled },
+    { id: "editText", label: "Edit Text", enabled },
     { id: "recognize", label: "Recognize Text", enabled },
     { type: "separator" },
     { id: "copy", label: "Copy", accelerator: "Ctrl+C", enabled: hasSelection },
@@ -1674,6 +1738,7 @@ function showViewMenu(tab, x, y) {
   ], x, y, {
     snapshot: () => tab.takeSnapshot(),
     shapes: () => tab.drawShapes(),
+    editText: () => tab.editText(),
     recognize: () => tab.recognizeText(),
     copy: () => document.execCommand("copy"),
     zoomIn: () => tab.zoomIn(),
@@ -1729,6 +1794,7 @@ function startPresentation() {
   tab.endPlacing();
   tab.endSnapshot();
   tab.endShapes();
+  tab.endTextEditing();
   state.presenting = true;
   document.body.classList.add("presenting", "hide-cursor");
   tab.setPresenting(true);
@@ -1844,6 +1910,9 @@ const actions = {
   drawShapes: withTab((tab) => {
     if (!state.presenting) tab.drawShapes();
   }),
+  editText: withTab((tab) => {
+    if (!state.presenting) tab.editText();
+  }),
   save: withTab((tab) => tab.save()),
   saveAs: withTab((tab) => tab.saveAs()),
   undo: withTab((tab) => tab.undo()),
@@ -1897,6 +1966,7 @@ el.exportCancel.addEventListener("click", () => {
 });
 el.snapshotCancel.addEventListener("click", () => state.selected?.endSnapshot());
 el.shapesCancel.addEventListener("click", () => state.selected?.endShapes());
+el.textEditDone.addEventListener("click", () => state.selected?.endTextEditing());
 el.shapesDone.addEventListener("click", () => state.selected?.finishShapes());
 // The tool is for the next shape; the color and width also change the selected one
 el.shapesBar.addEventListener("click", (event) => {
@@ -2030,6 +2100,12 @@ document.addEventListener("keydown", (event) => {
       event.preventDefault();
       return;
     }
+  }
+  // "Edit Text": Esc ends it (an open field takes its own Esc first)
+  if (event.key === "Escape" && state.selected?.editingText && !(event.target instanceof HTMLInputElement)) {
+    event.preventDefault();
+    state.selected.endTextEditing();
+    return;
   }
   if (event.key === "Escape" && state.selected?.takingSnapshot) {
     event.preventDefault();

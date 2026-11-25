@@ -628,3 +628,27 @@ body.dragging #documents::after {
   color: var(--text);
   font: inherit;
 }
+
+/* MARK: Edit Text */
+
+.text-edit-layer { position: absolute; inset: 0; z-index: 20; cursor: text; }
+.text-edit-hover {
+  position: absolute;
+  border-radius: 2px;
+  outline: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  pointer-events: none;
+}
+.text-edit-hover[hidden] { display: none; }
+.text-edit-field {
+  position: absolute;
+  z-index: 21;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 1px;
+  border: 0;
+  border-radius: 2px;
+  outline: 2px solid var(--accent);
+  background: #ffffff;
+  line-height: 1;
+}

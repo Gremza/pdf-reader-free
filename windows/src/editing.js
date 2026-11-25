@@ -1,10 +1,14 @@
-import { EncryptedPDFError, PDFDocument, degrees } from "../node_modules/pdf-lib/dist/pdf-lib.esm.min.js";
+import { EncryptedPDFError, PDFDocument, PDFName, degrees, rgb } from "../node_modules/pdf-lib/dist/pdf-lib.esm.min.js";
 import { drawImageOnPage, insertImagePage, isPDF, readImage } from "./images.js";
 import { drawShapesOnPage } from "./shapes.js";
+import { pageContent, readLines, removeLine, standardFont } from "./textlines.js";
 
 /** Page operations. Each takes the PDF bytes and returns new bytes; the input is never modified. */
 
 export class ProtectedPDFError extends Error {}
+
+/** The new text of a line has letters that the standard fonts can't write. */
+export class TextError extends Error {}
 
 /** Opens the PDF with pdf-lib; protected PDFs throw ProtectedPDFError. */
 export async function load(bytes) {
@@ -53,6 +57,30 @@ export const pageEdits = {
 
   /** Draws an image of `readImage` over the page; `matrix` maps the unit square, upright as shown, onto the page. */
   addImage: (bytes, index, image, matrix) => edit(bytes, (doc) => drawImageOnPage(doc, index, image, matrix)),
+
+  /**
+   * "Edit Text": takes line `lineIndex` of `readLines` out of the page and writes `text` in its place,
+   * in the closest standard font, at its size and in its color.
+   */
+  replaceLine: (bytes, index, lineIndex, text) => edit(bytes, async (doc) => {
+    const page = doc.getPage(index);
+    const { bytes: content, fonts } = pageContent(page);
+    const { ops, lines } = readLines(content, fonts);
+    const line = lines[lineIndex];
+    if (!line) throw new Error("The page can't be drawn.");
+    // The old content stays as it was drawn, whatever it leaves changed
+    const stream = doc.context.flateStream(new Uint8Array([...new TextEncoder().encode("q\n"), ...removeLine(content, ops, line), ...new TextEncoder().encode("\nQ\n")]));
+    page.node.set(PDFName.of("Contents"), doc.context.obj([doc.context.register(stream)]));
+    if (!text.trim()) return;
+    const font = await doc.embedFont(standardFont(line.font));
+    try {
+      page.drawText(text, {
+        x: line.start[0], y: line.start[1], size: line.size, font, color: rgb(...line.color), rotate: degrees(line.angle),
+      });
+    } catch {
+      throw new TextError();
+    }
+  }),
 
   /** Draws the shapes of "Draw Shapes" over their pages: `pages` as `ShapeDrawing.pdfShapes` gives them. */
   drawShapes: (bytes, pages) => edit(bytes, (doc) => {

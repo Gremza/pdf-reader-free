@@ -493,6 +493,7 @@ function menuTemplate() {
         separator,
         item("Take a Snapshot", "takeSnapshot", { icon: menuIcon("camera"), enabled: doc && (s.canEdit || s.takingSnapshot) && !s.presenting }),
         item("Draw Shapes", "drawShapes", { enabled: doc && (s.canEdit || s.drawingShapes) && !s.presenting }),
+        item("Edit Text", "editText", { enabled: doc && (s.canEdit || s.editingText) && !s.presenting }),
         separator,
         item("Search", "focusSearch", { accelerator: "CmdOrCtrl+F", enabled: doc && !s.presenting }),
         item("Find Next", "findNext", { accelerator: "CmdOrCtrl+G", enabled: doc }),
